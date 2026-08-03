@@ -337,40 +337,61 @@ export default function App() {
     setTimeout(() => setToast(null), 2600);
   };
 
+  const [lastAction, setLastAction] = useState(null);
+  const storeSavers = {
+    expenses: saveExpenses, custodies: saveCustodies, revenues: saveRevenues,
+    fuelRecords: saveFuelRecords, oilRecords: saveOilRecords, equipmentCodes: saveEquipmentCodes, salaries: saveSalaries,
+  };
+  const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
+  const pushUndoMulti = (entries) => setLastAction(entries);
+  const handleUndo = () => {
+    if (!lastAction) return;
+    lastAction.forEach(({ storeKey, prevValue }) => storeSavers[storeKey](prevValue));
+    setLastAction(null);
+    showToast("تم التراجع عن آخر تعديل");
+  };
+
   const addExpense = (entry) => {
+    pushUndo("expenses", expenses);
     const next = [...expenses, { ...entry, location: cleanText(entry.location), id: uid() }];
     saveExpenses(next);
     showToast("تم حفظ بند الصرف بنجاح");
   };
 
   const deleteExpense = (id) => {
+    pushUndo("expenses", expenses);
     saveExpenses(expenses.filter((e) => e.id !== id));
     showToast("تم حذف البند", "danger");
   };
 
   const updateExpense = (id, updates) => {
+    pushUndo("expenses", expenses);
     const cleaned = updates.location !== undefined ? { ...updates, location: cleanText(updates.location) } : updates;
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, ...cleaned } : e)));
     showToast("تم تعديل بند الصرف");
   };
 
   const acknowledgePendingExpense = (id) => {
+    pushUndo("expenses", expenses);
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, pendingAck: true } : e)));
     showToast("تم تسجيل إن البند اتحمّل");
   };
 
   const addRevenue = (entry) => {
+    pushUndo("revenues", revenues);
     const total = (Number(entry.months) || 0) * (Number(entry.monthlyRate) || 0);
     saveRevenues([...revenues, { ...entry, location: cleanText(entry.location), total, id: uid() }]);
     showToast("تم حفظ بند الإيراد بنجاح");
   };
 
   const deleteRevenue = (id) => {
+    pushUndo("revenues", revenues);
     saveRevenues(revenues.filter((r) => r.id !== id));
     showToast("تم حذف بند الإيراد", "danger");
   };
 
   const addFuelRecord = (rec) => {
+    pushUndo("fuelRecords", fuelRecords);
     const distance = (Number(rec.odometerEnd) || 0) - (Number(rec.odometerStart) || 0);
     const total = (Number(rec.quantity) || 0) * (Number(rec.pricePerLiter) || 0) + (Number(rec.commission) || 0) + (Number(rec.tax) || 0);
     const rate = Number(rec.quantity) ? distance / Number(rec.quantity) : 0;
@@ -379,53 +400,69 @@ export default function App() {
   };
 
   const deleteFuelRecord = (id) => {
+    pushUndo("fuelRecords", fuelRecords);
     saveFuelRecords(fuelRecords.filter((r) => r.id !== id));
     showToast("تم حذف سجل السولار", "danger");
   };
 
   const bulkImportFuel = (newRecords, mode) => {
+    pushUndo("fuelRecords", fuelRecords);
     if (mode === "replace") saveFuelRecords(newRecords);
     else saveFuelRecords([...fuelRecords, ...newRecords]);
     showToast(`تم استيراد ${newRecords.length} سجل سولار`);
   };
 
   const addOilRecord = (rec) => {
+    pushUndo("oilRecords", oilRecords);
     const total = (Number(rec.quantity) || 0) * (Number(rec.unitPrice) || 0);
     saveOilRecords([...oilRecords, { ...rec, total, equipmentCode: rec.equipmentCode, location: cleanText(rec.location), id: uid() }]);
     showToast("تم حفظ مسحوبات الزيوت بنجاح");
   };
 
   const deleteOilRecord = (id) => {
+    pushUndo("oilRecords", oilRecords);
     saveOilRecords(oilRecords.filter((r) => r.id !== id));
     showToast("تم حذف السجل", "danger");
   };
 
   const bulkImportOils = (newRecords, mode) => {
+    pushUndo("oilRecords", oilRecords);
     if (mode === "replace") saveOilRecords(newRecords);
     else saveOilRecords([...oilRecords, ...newRecords]);
     showToast(`تم استيراد ${newRecords.length} سجل زيوت وفلاتر`);
   };
 
   const addEquipmentCode = (c) => {
+    pushUndo("equipmentCodes", equipmentCodes);
     saveEquipmentCodes([...equipmentCodes, { ...c, location: cleanText(c.location), id: uid() }]);
     showToast("تم إضافة الكود");
   };
   const updateEquipmentCode = (id, updates) => {
+    pushUndo("equipmentCodes", equipmentCodes);
     const cleaned = updates.location !== undefined ? { ...updates, location: cleanText(updates.location) } : updates;
     saveEquipmentCodes(equipmentCodes.map((c) => (c.id === id ? { ...c, ...cleaned } : c)));
     showToast("تم تعديل الكود");
   };
   const deleteEquipmentCode = (id) => {
+    pushUndo("equipmentCodes", equipmentCodes);
     saveEquipmentCodes(equipmentCodes.filter((c) => c.id !== id));
     showToast("تم حذف الكود", "danger");
   };
   const bulkImportEquipmentCodes = (newCodes, mode) => {
+    pushUndo("equipmentCodes", equipmentCodes);
     if (mode === "replace") saveEquipmentCodes(newCodes);
     else saveEquipmentCodes([...equipmentCodes, ...newCodes]);
     showToast(`تم استيراد ${newCodes.length} كود معدة`);
   };
 
   const mergeCodeSpellings = (oldSpellings, canonical) => {
+    pushUndoMulti([
+      { storeKey: "expenses", prevValue: expenses },
+      { storeKey: "fuelRecords", prevValue: fuelRecords },
+      { storeKey: "oilRecords", prevValue: oilRecords },
+      { storeKey: "revenues", prevValue: revenues },
+      { storeKey: "equipmentCodes", prevValue: equipmentCodes },
+    ]);
     const oldSet = new Set(oldSpellings.map((s) => normCode(s)));
     const matches = (v) => oldSet.has(normCode(v));
 
@@ -452,21 +489,30 @@ export default function App() {
   };
 
   const addSalary = (s) => {
-    saveSalaries([...salaries, { ...s, id: uid() }]);
+    pushUndo("salaries", salaries);
+    saveSalaries([...salaries, { ...s, loadedAmount: 0, id: uid() }]);
     showToast("تم حفظ بند المرتبات");
   };
   const deleteSalary = (id) => {
+    pushUndo("salaries", salaries);
     saveSalaries(salaries.filter((s) => s.id !== id));
     showToast("تم حذف بند المرتبات", "danger");
   };
+  const updateSalaryLoaded = (id, loadedAmount) => {
+    pushUndo("salaries", salaries);
+    saveSalaries(salaries.map((s) => (s.id === id ? { ...s, loadedAmount } : s)));
+    showToast("تم تحديث المبلغ المحمّل");
+  };
 
   const addCustody = (c) => {
+    pushUndo("custodies", custodies);
     const next = [...custodies, { ...c, id: uid() }];
     saveCustodies(next);
     showToast("تم إضافة العهدة");
   };
 
   const updateCustody = (id, updates) => {
+    pushUndo("custodies", custodies);
     saveCustodies(custodies.map((c) => (c.id === id ? { ...c, ...updates } : c)));
     showToast("تم تعديل بيانات العهدة");
   };
@@ -476,6 +522,7 @@ export default function App() {
       showToast("لا يمكن حذف عهدة مرتبطة ببنود صرف", "danger");
       return;
     }
+    pushUndo("custodies", custodies);
     saveCustodies(custodies.filter((c) => c.id !== id));
     showToast("تم حذف العهدة", "danger");
   };
@@ -491,6 +538,10 @@ export default function App() {
   }, [custodies, expenses]);
 
   const bulkImport = ({ newCustodies, newExpenses, mode }) => {
+    pushUndoMulti([
+      { storeKey: "custodies", prevValue: custodies },
+      { storeKey: "expenses", prevValue: expenses },
+    ]);
     if (mode === "replace") {
       saveCustodies(newCustodies);
       saveExpenses(newExpenses);
@@ -546,6 +597,7 @@ export default function App() {
           #print-area th, #print-area td { border: 1px solid #999; padding: 4px 6px; }
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
+          .totals-signatures-block { page-break-inside: avoid; }
           #print-area table.profit-table th:first-child,
           #print-area table.profit-table td:first-child { width: 22% !important; min-width: 22% !important; }
           .no-print { display: none !important; }
@@ -641,9 +693,16 @@ export default function App() {
           <div className="text-xs font-semibold hidden sm:block" style={{ color: COLORS.slateLight }}>
             {new Date().toLocaleDateString("ar-EG", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </div>
-          <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: COLORS.gold }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.success }} />
-            <span className="hidden sm:inline">متصل ومحفوظ تلقائيًا</span>
+          <div className="flex items-center gap-3">
+            {lastAction && (
+              <button onClick={handleUndo} className="px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold" style={{ background: COLORS.cream, color: COLORS.ink, border: `1px solid ${COLORS.border}` }}>
+                <ArrowLeft size={14} /> تراجع عن آخر تعديل
+              </button>
+            )}
+            <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: COLORS.gold }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.success }} />
+              <span className="hidden sm:inline">متصل ومحفوظ تلقائيًا</span>
+            </div>
           </div>
         </div>
         {loading ? (
@@ -669,7 +728,7 @@ export default function App() {
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
             {view === "salaries" && <SalariesView salaries={salaries} onAdd={addSalary} onDelete={deleteSalary} />}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
-            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} onAcknowledgePending={acknowledgePendingExpense} />}
+            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onAcknowledgePending={acknowledgePendingExpense} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
           </div>
@@ -1313,9 +1372,33 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
     }));
   };
 
+  const handleExcelExport = () => {
+    const rowsOut = rows.map((e) => ({
+      "التاريخ": e.date, "الجهة": e.source, "العهدة": custodyLabel(e.custodyId), "التصنيف": e.category,
+      "كود المعدة": e.equipmentCode, "النوع": e.equipmentType, "الماركة": e.brand, "الموقع": e.location,
+      "الغرض من الصرف": e.purpose, "ملاحظات": e.notes, "طريقة الصرف": e.paymentMethod,
+      "نقدي": Number(e.cash) || 0, "تحويل": Number(e.transfer) || 0, "شيك": Number(e.check) || 0,
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rowsOut), "قاعدة البيانات");
+    XLSX.writeFile(wb, `قاعدة_البيانات_${todayISO()}.xlsx`);
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div className="space-y-6">
-      <Header title="قاعدة البيانات" sub={`${expenses.length} بند صرف مسجل`} />
+      <Header
+        title="قاعدة البيانات"
+        sub={`${expenses.length} بند صرف مسجل`}
+        action={
+          <div className="no-print flex flex-wrap gap-2">
+            <ExportButtons onExcel={handleExcelExport} onPdf={handlePrint} />
+          </div>
+        }
+      />
 
       {editing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
@@ -1435,6 +1518,27 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
           </div>
         )}
       </SectionCard>
+
+      <div className="print-only-area" id="print-area">
+        <h2 style={{ fontFamily: "Cairo", textAlign: "center" }}>قاعدة البيانات</h2>
+        <table>
+          <thead>
+            <tr>{["التاريخ", "الجهة", "التصنيف", "كود المعدة", "النوع", "الموقع", "الغرض من الصرف", "نقدي", "تحويل", "شيك"].map((h) => <th key={h}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={e.id}>
+                <td>{e.date}</td><td>{e.source}</td><td>{e.category}</td><td>{e.equipmentCode}</td>
+                <td>{e.equipmentType}</td><td>{e.location}</td><td>{e.purpose}</td>
+                <td>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                <td>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                <td>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+              </tr>
+            ))}
+            <tr><td colSpan={7}><b>الإجمالي</b></td><td colSpan={3}><b>{fmtMoney(rowsTotal)}</b></td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2681,10 +2785,11 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     revenues.forEach((r) => { const rc = resolveCode(r.equipmentCode); if (rc) realCodes.add(rc); });
 
     const maintCost = {}, cardsCost = {}, fuelCost = {}, oilCost = {}, revenue = {};
-    const classifyPurpose = (purpose) => {
+    const classifyPurpose = (purpose, isVehicleCode) => {
       const p = String(purpose || "");
       if (/كارت|ميزان|موازين/.test(p)) return "cards";
-      if (/زيت/.test(p)) return "oil";
+      // زيت العربيات بيتحسب من قاعدة البيانات، أما زيت المعدات فبييجي من تاب الزيوت والفلاتر بس
+      if (isVehicleCode && /زيت/.test(p)) return "oil";
       return "maint";
     };
     expenses.forEach((e) => {
@@ -2692,7 +2797,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       const rc = resolveCode(e.equipmentCode);
       if (!rc || isCostPoolCode(rc)) return;
       const t = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
-      const cls = classifyPurpose(e.purpose);
+      const cls = classifyPurpose(e.purpose, vehicleCodes.has(rc));
       if (cls === "cards") cardsCost[rc] = (cardsCost[rc] || 0) + t;
       else if (cls === "oil") oilCost[rc] = (oilCost[rc] || 0) + t;
       else maintCost[rc] = (maintCost[rc] || 0) + t;
@@ -2860,14 +2965,20 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                 <tbody>
                   {g.list.map((r) => (
                     <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap" style={{ minWidth: 320 }}>
-                        <span>{r.code}</span>
-                        {r.type && (
-                          <span className="mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold text-white" style={{ background: typeBadgeColor(r.type) }}>{r.type}</span>
-                        )}
-                        {r.isVehicle && (
-                          <span className="mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate, border: `1px solid ${COLORS.border}` }}>سيارة</span>
-                        )}
+                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap" style={{ minWidth: 280 }}>
+                        <div className="flex items-center gap-2">
+                          <span style={{ display: "inline-block", minWidth: 100 }}>{r.code}</span>
+                          {r.type ? (
+                            <span
+                              className="inline-flex items-center justify-center px-2 py-1 rounded text-[9px] font-bold text-white whitespace-nowrap"
+                              style={{ background: typeBadgeColor(r.type), minWidth: 70 }}
+                            >
+                              {r.type}
+                            </span>
+                          ) : (
+                            <span style={{ minWidth: 70, display: "inline-block" }} />
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.cards)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.maint)}</td>
@@ -3894,6 +4005,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               </tbody>
             </table>
           ))}
+          <div className="totals-signatures-block">
           <table className="w-full border-collapse text-xs" style={{ minWidth: 900 }}>
             <colgroup>
               <col style={{ width: "3%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
@@ -3911,8 +4023,9 @@ function PrintView({ custodies, custodyTotals, expenses }) {
             </tbody>
           </table>
           </div>
+          </div>
 
-          <div className="grid grid-cols-4 gap-6 mt-10 pt-4">
+          <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
             {SIGNATURES.map((s) => (
               <div key={s} className="text-center">
                 <div className="border-b pb-8 mb-1" style={{ borderColor: COLORS.ink }} />
@@ -3926,7 +4039,8 @@ function PrintView({ custodies, custodyTotals, expenses }) {
   );
 }
 
-function AlertsView({ custodies, custodyTotals, expenses, revenues, onAcknowledgePending }) {
+function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, onAcknowledgePending, onUpdateSalaryLoaded }) {
+  const [loadedInputs, setLoadedInputs] = useState({});
   const deficitCustodies = custodies.filter((c) => (custodyTotals[c.id]?.remaining || 0) < 0);
 
   const pendingExpenses = useMemo(
@@ -4001,6 +4115,52 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues, onAcknowledg
                   >
                     <CheckCircle2 size={14} /> تم التحميل
                   </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="متابعة تحميل المرتبات على المعدات">
+        {salaries.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: COLORS.success }}>
+            <CheckCircle2 size={16} /> لا توجد بنود مرتبات مسجّلة
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {salaries.map((s) => {
+              const amount = Number(s.amount) || 0;
+              const loaded = Number(s.loadedAmount) || 0;
+              const remaining = amount - loaded;
+              const inputVal = loadedInputs[s.id] !== undefined ? loadedInputs[s.id] : loaded;
+              return (
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                  <div className="text-sm flex-1 min-w-[200px]">
+                    <span style={{ color: COLORS.ink }}>{s.source} — {s.month}</span>
+                    <span style={{ color: COLORS.slate }}> — الإجمالي </span>
+                    <b className="tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(amount)}</b>
+                    <span style={{ color: COLORS.slate }}> — المتبقي </span>
+                    <b className="tabular-nums" style={{ color: remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(remaining)}</b>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs" style={{ color: COLORS.slate }}>تم تحميل:</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={inputVal}
+                      onChange={(e) => setLoadedInputs((m) => ({ ...m, [s.id]: e.target.value }))}
+                      className="w-28 px-2 py-1.5 rounded-lg text-sm border text-center"
+                      style={{ borderColor: COLORS.border }}
+                    />
+                    <button
+                      onClick={() => onUpdateSalaryLoaded(s.id, Number(inputVal) || 0)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                      style={{ background: COLORS.gold, color: COLORS.navy }}
+                    >
+                      حفظ
+                    </button>
+                  </div>
                 </div>
               );
             })}
