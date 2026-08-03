@@ -125,20 +125,40 @@ function useStorage(key, initial, shared = true) {
    عناصر واجهة صغيرة
 ============================================================ */
 function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
-  const bg = tone === "gold" ? COLORS.gold : COLORS.navy;
+  const isGold = tone === "gold";
+  const bg = isGold ? COLORS.paper : COLORS.navy;
+  const textColor = isGold ? COLORS.ink : "white";
+  const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.7)";
+  const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.6)";
   return (
     <div
-      style={{ background: bg, borderRadius: 14 }}
-      className="relative flex-1 min-w-[150px] p-4 md:p-5 text-white overflow-hidden"
+      style={{
+        background: bg,
+        borderRadius: 14,
+        border: isGold ? `1px solid ${COLORS.border}` : "none",
+        boxShadow: isGold ? "0 1px 2px rgba(16,26,46,0.04), 0 8px 20px -12px rgba(16,26,46,0.10)" : "0 4px 14px -6px rgba(16,26,46,0.35)",
+      }}
+      className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden"
     >
-      <div className="absolute -left-6 -top-6 w-24 h-24 rounded-full bg-white/5" />
-      <div className="absolute -left-2 -bottom-8 w-20 h-20 rounded-full bg-white/5" />
+      {!isGold && (
+        <>
+          <div className="absolute -left-6 -top-6 w-24 h-24 rounded-full bg-white/5" />
+          <div className="absolute -left-2 -bottom-8 w-20 h-20 rounded-full bg-white/5" />
+        </>
+      )}
       <div className="relative flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold tracking-wide text-white/70">{label}</span>
-        {Icon && <Icon size={18} className="text-white/60" />}
+        <span className="text-xs font-semibold tracking-wide" style={{ color: labelColor }}>{label}</span>
+        {Icon && (
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: isGold ? COLORS.goldSoft + "33" : "rgba(255,255,255,0.12)" }}
+          >
+            <Icon size={16} style={{ color: isGold ? COLORS.gold : "rgba(255,255,255,0.85)" }} />
+          </div>
+        )}
       </div>
-      <div className="relative text-2xl font-bold tabular-nums">{value}</div>
-      {sub && <div className="relative text-xs text-white/60 mt-1">{sub}</div>}
+      <div className="relative text-2xl font-bold tabular-nums" style={{ color: textColor }}>{value}</div>
+      {sub && <div className="relative text-xs mt-1" style={{ color: subColor }}>{sub}</div>}
     </div>
   );
 }
@@ -332,6 +352,11 @@ export default function App() {
     const cleaned = updates.location !== undefined ? { ...updates, location: cleanText(updates.location) } : updates;
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, ...cleaned } : e)));
     showToast("تم تعديل بند الصرف");
+  };
+
+  const acknowledgePendingExpense = (id) => {
+    saveExpenses(expenses.map((e) => (e.id === id ? { ...e, pendingAck: true } : e)));
+    showToast("تم تسجيل إن البند اتحمّل");
   };
 
   const addRevenue = (entry) => {
@@ -644,7 +669,7 @@ export default function App() {
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
             {view === "salaries" && <SalariesView salaries={salaries} onAdd={addSalary} onDelete={deleteSalary} />}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
-            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} />}
+            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} onAcknowledgePending={acknowledgePendingExpense} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
           </div>
@@ -2655,13 +2680,22 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     oilRecords.forEach((r) => { const rc = resolveCode(r.equipmentCode); if (rc) realCodes.add(rc); });
     revenues.forEach((r) => { const rc = resolveCode(r.equipmentCode); if (rc) realCodes.add(rc); });
 
-    const maintCost = {}, fuelCost = {}, oilCost = {}, revenue = {};
+    const maintCost = {}, cardsCost = {}, fuelCost = {}, oilCost = {}, revenue = {};
+    const classifyPurpose = (purpose) => {
+      const p = String(purpose || "");
+      if (/كارت|ميزان|موازين/.test(p)) return "cards";
+      if (/زيت/.test(p)) return "oil";
+      return "maint";
+    };
     expenses.forEach((e) => {
       if (isPendingCode(e.equipmentCode)) return;
       const rc = resolveCode(e.equipmentCode);
       if (!rc || isCostPoolCode(rc)) return;
       const t = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
-      maintCost[rc] = (maintCost[rc] || 0) + t;
+      const cls = classifyPurpose(e.purpose);
+      if (cls === "cards") cardsCost[rc] = (cardsCost[rc] || 0) + t;
+      else if (cls === "oil") oilCost[rc] = (oilCost[rc] || 0) + t;
+      else maintCost[rc] = (maintCost[rc] || 0) + t;
     });
     fuelRecords.forEach((r) => {
       const rc = resolveCode(r.code);
@@ -2693,22 +2727,23 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     realCodes.forEach((code) => {
       if (vehicleCodes.has(code)) return;
       const owner = ownerByCode[code];
-      const direct = (maintCost[code] || 0) + (fuelCost[code] || 0) + (oilCost[code] || 0);
+      const direct = (maintCost[code] || 0) + (cardsCost[code] || 0) + (fuelCost[code] || 0) + (oilCost[code] || 0);
       if (owner && SOURCES.includes(owner)) totalDirectByOwner[owner] += direct;
     });
 
     return [...realCodes].map((code) => {
       const owner = ownerByCode[code] || "غير محدد";
       const maint = maintCost[code] || 0;
+      const cards = cardsCost[code] || 0;
       const fuel = fuelCost[code] || 0;
       const oil = oilCost[code] || 0;
-      const direct = maint + fuel + oil;
+      const direct = maint + cards + fuel + oil;
       const isVehicle = vehicleCodes.has(code);
       const ownerDirectTotal = totalDirectByOwner[owner] || 0;
       const share = !isVehicle && ownerDirectTotal > 0 && SOURCES.includes(owner) ? (poolByOwner[owner] || 0) * (direct / ownerDirectTotal) : 0;
       const totalCost = direct + share;
       const rev = revenue[code] || 0;
-      return { code, owner, isVehicle, type: typeByCode[code] || "", maint, fuel, oil, direct, share, totalCost, revenue: rev, net: rev - totalCost };
+      return { code, owner, isVehicle, type: typeByCode[code] || "", maint, cards, fuel, oil, direct, share, totalCost, revenue: rev, net: rev - totalCost };
     }).sort((a, b) => {
       const typeCompare = String(a.type || "").localeCompare(String(b.type || ""), "ar");
       if (typeCompare !== 0) return typeCompare;
@@ -2717,10 +2752,10 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
   }, [expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes, ownerByCode, typeByCode, poolCodeByOwner, resolveCode, vehicleCodes]);
 
   const totals = rows.reduce((acc, r) => ({
-    maint: acc.maint + r.maint, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
+    maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
     share: acc.share + r.share, cost: acc.cost + r.totalCost,
     revenue: acc.revenue + r.revenue, net: acc.net + r.net,
-  }), { maint: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
+  }), { maint: 0, cards: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
 
   const totalSalaries = salaries.reduce((s, x) => s + (Number(x.amount) || 0), 0);
 
@@ -2758,8 +2793,9 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       />
 
       <div id="print-area">
-      <div className="no-print grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="no-print grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <KPICard label="إجمالي الإيراد" value={fmtMoney(totals.revenue)} icon={TrendingUp} />
+        <KPICard label="كارتات" value={fmtMoney(totals.cards)} tone="gold" icon={Wrench} />
         <KPICard label="مصروفات صيانة" value={fmtMoney(totals.maint)} tone="gold" icon={Wrench} />
         <KPICard label="مصروفات سولار" value={fmtMoney(totals.fuel)} tone="gold" icon={Fuel} />
         <KPICard label="مصروفات زيوت وفلاتر" value={fmtMoney(totals.oil)} tone="gold" icon={Wrench} />
@@ -2781,25 +2817,16 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
 
       {ownerGroups.map((g) => {
         const gTotals = g.list.reduce((acc, r) => ({
-          maint: acc.maint + r.maint, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
+          maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
           share: acc.share + r.share, cost: acc.cost + r.totalCost, revenue: acc.revenue + r.revenue, net: acc.net + r.net,
-        }), { maint: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
-        const gPending = pendingByOwner[g.owner] || [];
+        }), { maint: 0, cards: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
         return (
           <SectionCard key={g.owner} title={`${g.owner} (${g.list.length} معدة)`}>
-            {gPending.length > 0 && (
-              <div className="mb-4 p-3 rounded-lg space-y-1.5" style={{ background: COLORS.cream, border: `1px solid ${COLORS.border}` }}>
-                {gPending.map((p) => (
-                  <div key={p.id} className="flex items-start gap-2 text-xs" style={{ color: COLORS.slate }}>
-                    <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-                    <span>
-                      {p.purpose} بقيمة <b style={{ color: COLORS.ink }}>{fmtMoney(p.amount)}</b> — لم يتم توزيع تكلفتها لحين الصرف من المخازن وتحميلها على كود معدة معيّن.
-                    </span>
-                  </div>
-                ))}
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>كارتات</div>
+                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.cards)}</div>
               </div>
-            )}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
               <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات صيانة</div>
                 <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.maint)}</div>
@@ -2825,7 +2852,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
               <table className="w-full text-sm profit-table">
                 <thead>
                   <tr style={{ background: COLORS.cream }}>
-                    {["كود المعدة", "مصروفات صيانة", "مصروفات سولار", "مصروفات زيوت", "إجمالي مباشر", "تكلفة غير مباشرة", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
+                    {["كود المعدة", "كارتات", "مصروفات صيانة", "مصروفات سولار", "مصروفات زيوت", "إجمالي مباشر", "تكلفة غير مباشرة", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
                       <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate, minWidth: i === 0 ? 320 : 90 }}>{h}</th>
                     ))}
                   </tr>
@@ -2842,6 +2869,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                           <span className="mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate, border: `1px solid ${COLORS.border}` }}>سيارة</span>
                         )}
                       </td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.cards)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.maint)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.fuel)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.oil)}</td>
@@ -3898,8 +3926,13 @@ function PrintView({ custodies, custodyTotals, expenses }) {
   );
 }
 
-function AlertsView({ custodies, custodyTotals, expenses, revenues }) {
+function AlertsView({ custodies, custodyTotals, expenses, revenues, onAcknowledgePending }) {
   const deficitCustodies = custodies.filter((c) => (custodyTotals[c.id]?.remaining || 0) < 0);
+
+  const pendingExpenses = useMemo(
+    () => expenses.filter((e) => isPendingCode(e.equipmentCode) && !e.pendingAck),
+    [expenses]
+  );
 
   const missingData = expenses.filter((e) => !e.category || !e.purpose || !e.custodyId);
 
@@ -3940,6 +3973,40 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues }) {
   return (
     <div className="space-y-6">
       <Header title="تنبيهات ومراجعة" sub="عهد بها عجز، صيانة متأخرة، وفحص جودة البيانات" />
+
+      <SectionCard title={`مصروفات مسجّلة بدون كود معدة (بانتظار التحميل) (${pendingExpenses.length})`}>
+        {pendingExpenses.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: COLORS.success }}>
+            <CheckCircle2 size={16} /> مفيش بنود معلّقة حاليًا
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {pendingExpenses.map((e) => {
+              const amount = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+              return (
+                <div key={e.id} className="flex items-center justify-between gap-3 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                  <div className="flex items-start gap-2 text-sm flex-1">
+                    <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" style={{ color: COLORS.slate }} />
+                    <div>
+                      <span style={{ color: COLORS.ink }}>{e.purpose || "بند بدون وصف"}</span>
+                      <span style={{ color: COLORS.slate }}> — {e.source || "غير محدد"} — بقيمة </span>
+                      <b className="tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(amount)}</b>
+                      <span style={{ color: COLORS.slate }}> — لسه مش محمّلة على أي كود معدة.</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onAcknowledgePending(e.id)}
+                    className="px-3 py-2 rounded-lg text-xs font-bold text-white flex-shrink-0 flex items-center gap-1.5"
+                    style={{ background: COLORS.success }}
+                  >
+                    <CheckCircle2 size={14} /> تم التحميل
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
 
       <SectionCard title="عهد بها عجز (المصروف أكبر من المتاح)">
         {deficitCustodies.length === 0 ? (
