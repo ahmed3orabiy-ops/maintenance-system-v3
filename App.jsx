@@ -318,7 +318,19 @@ export default function App() {
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
   const [equipmentCodes, saveEquipmentCodes, codesLoaded] = useStorage("equipmentCodes", []);
   const [salaries, saveSalaries, salariesLoaded] = useStorage("salaries", []);
-  const [view, setView] = useState("home");
+  const [view, setView] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get("view");
+      const validViews = [
+        "home", "dashboard", "analysis", "revenueAnalysis", "entry", "revenue", "custodies",
+        "database", "equipment", "profitability", "maintenanceLog", "fuel", "oils", "fuelAnalysis",
+        "equipmentCodes", "salaries", "print", "alerts", "import", "export",
+      ];
+      if (v && validViews.includes(v)) return v;
+    } catch (e) {}
+    return "home";
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(typeof window !== "undefined" ? window.innerWidth >= 768 : true);
   useEffect(() => {
