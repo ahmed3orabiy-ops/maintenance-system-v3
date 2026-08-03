@@ -635,6 +635,11 @@ export default function App() {
     saveSalaries(salaries.filter((s) => s.id !== id));
     showToast("تم حذف بند المرتبات", "danger");
   };
+  const updateSalary = (id, updates) => {
+    pushUndo("salaries", salaries);
+    saveSalaries(salaries.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+    showToast("تم تحديث بند المرتبات");
+  };
   const updateSalaryLoaded = (id, loadedAmount) => {
     pushUndo("salaries", salaries);
     saveSalaries(salaries.map((s) => (s.id === id ? { ...s, loadedAmount } : s)));
@@ -764,18 +769,26 @@ export default function App() {
         table { border-collapse: collapse; }
         @page { size: A4 portrait; margin: 10mm 8mm; }
         .print-only-area { position: absolute; left: -99999px; top: -99999px; }
+        .profit-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+        .profit-summary-box { flex: 1 1 22%; min-width: 130px; }
         @media print {
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
           #print-area table { width: 100% !important; min-width: 0 !important; font-size: 9px; table-layout: fixed; }
-          #print-area th, #print-area td { padding: 3px 4px !important; word-break: break-word; }
+          #print-area th, #print-area td { padding: 3px 4px !important; word-break: break-word; overflow-wrap: break-word; }
           #print-area th, #print-area td { border: 1px solid #999; padding: 4px 6px; }
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
+          #print-area table.profit-table { font-size: 7px; }
+          #print-area table.profit-table th, #print-area table.profit-table td { padding: 2px 3px !important; word-break: normal; overflow-wrap: break-word; line-height: 1.25; }
           #print-area table.profit-table th:first-child,
-          #print-area table.profit-table td:first-child { width: 22% !important; min-width: 22% !important; }
+          #print-area table.profit-table td:first-child { width: 15% !important; min-width: 15% !important; }
+          .profit-summary-grid { flex-wrap: nowrap !important; }
+          .profit-summary-box { flex: 1 1 0 !important; min-width: 0 !important; padding: 4px !important; }
+          .profit-summary-box .profit-summary-label { font-size: 7px !important; }
+          .profit-summary-box .profit-summary-value { font-size: 9px !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -909,7 +922,7 @@ export default function App() {
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
-            {view === "salaries" && <SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onDelete={deleteSalary} />}
+            {view === "salaries" && <SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} />}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
@@ -2778,8 +2791,10 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
 /* ============================================================
    المرتبات
 ============================================================ */
-function SalariesView({ salaries, equipmentCodes, onAdd, onDelete }) {
+function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [q, setQ] = useState("");
   const empty = { month: todayISO().slice(0, 7), source: SOURCES[0], salaryType: "driver", employeeName: "", equipmentCode: "", amount: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -2789,21 +2804,48 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onDelete }) {
     [equipmentCodes, form.source]
   );
 
+  const startAdd = () => { setEditingId(null); setForm(empty); setShowForm(true); };
+  const startEdit = (s) => {
+    setEditingId(s.id);
+    setForm({
+      month: s.month || todayISO().slice(0, 7),
+      source: s.source || SOURCES[0],
+      salaryType: s.salaryType === "driver" ? "driver" : "indirect",
+      employeeName: s.employeeName || "",
+      equipmentCode: s.equipmentCode || "",
+      amount: s.amount ?? "",
+    });
+    setShowForm(true);
+  };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+
   const submit = (e) => {
     e.preventDefault();
-    onAdd(form.salaryType === "driver" ? form : { ...form, equipmentCode: "" });
-    setForm(empty);
-    setShowForm(false);
+    const payload = form.salaryType === "driver" ? form : { ...form, equipmentCode: "" };
+    if (editingId) onUpdate(editingId, payload);
+    else onAdd(payload);
+    cancel();
   };
 
   const isDirect = (s) => s.salaryType === "driver" && s.equipmentCode;
   const total = salaries.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalDirect = salaries.filter(isDirect).reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalIndirect = total - totalDirect;
-  const bySource = SOURCES.map((s) => ({
-    source: s,
-    total: salaries.filter((r) => r.source === s).reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
-  }));
+  const bySource = SOURCES.map((s) => {
+    const list = salaries.filter((r) => r.source === s);
+    const direct = list.filter(isDirect).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    const sourceTotal = list.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    return { source: s, total: sourceTotal, direct, indirect: sourceTotal - direct };
+  });
+
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return [...salaries]
+      .filter((s) => !term || [s.employeeName, s.equipmentCode, s.source, s.month].join(" ").toLowerCase().includes(term))
+      .sort((a, b) => (b.month || "").localeCompare(a.month || ""));
+  }, [salaries, q]);
+
+  const handlePrint = () => window.print();
 
   return (
     <div className="space-y-6">
@@ -2811,87 +2853,125 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onDelete }) {
         title="المرتبات"
         sub="مرتبات السائقين بيتحملوا مباشرة على كود المعدة، ومرتبات المشرفين والمحاسبين بتتحط كمجمع تكلفة يتوزّع على المعدات"
         action={
-          <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
-            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند مرتبات جديد"}
-          </button>
+          <div className="no-print flex flex-wrap gap-2 items-center">
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+              <Printer size={16} /> طباعة
+            </button>
+            <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند مرتبات جديد"}
+            </button>
+          </div>
         }
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <KPICard label="إجمالي المرتبات الكلي" value={fmtMoney(total)} icon={Wallet} />
-        <KPICard label="مرتبات مباشرة (سائقين)" value={fmtMoney(totalDirect)} tone="gold" icon={Wallet} />
-        <KPICard label="مرتبات غير مباشرة (مشرفين ومحاسبين)" value={fmtMoney(totalIndirect)} tone="gold" icon={Wallet} />
-        {bySource.map((b) => (
-          <KPICard key={b.source} label={`مرتبات ${b.source}`} value={fmtMoney(b.total)} icon={Wallet} />
-        ))}
-      </div>
+      <div id="print-area">
+        <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <KPICard label="إجمالي المرتبات الكلي" value={fmtMoney(total)} icon={Wallet} />
+          <KPICard label="مرتبات مباشرة (سائقين)" value={fmtMoney(totalDirect)} tone="gold" icon={Wallet} />
+          <KPICard label="مرتبات غير مباشرة (مشرفين ومحاسبين)" value={fmtMoney(totalIndirect)} tone="gold" icon={Wallet} />
+        </div>
 
-      {showForm && (
-        <form onSubmit={submit}>
-          <SectionCard title="بند مرتبات جديد">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="الشهر" required><TextInput type="month" value={form.month} onChange={set("month")} required /></Field>
-              <Field label="الجهة" required><Select value={form.source} onChange={set("source")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
-              <Field label="نوع المرتب" required>
-                <Select value={form.salaryType} onChange={set("salaryType")}>
-                  <option value="driver">سائق / عامل معدة (تكلفة مباشرة)</option>
-                  <option value="indirect">مشرف أو محاسب (مجمع تكلفة يُوزّع)</option>
-                </Select>
-              </Field>
-              <Field label="اسم الموظف" required><TextInput value={form.employeeName} onChange={set("employeeName")} required placeholder="اسم السائق أو الموظف" /></Field>
-              {form.salaryType === "driver" && (
-                <Field label="كود المعدة" required>
-                  <Select value={form.equipmentCode} onChange={set("equipmentCode")} required>
-                    <option value="">اختر كود المعدة</option>
-                    {codeOptions.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          {bySource.map((b) => (
+            <SectionCard key={b.source} title={`مرتبات ${b.source}`}>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                  <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>الإجمالي</div>
+                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.total)}</div>
+                </div>
+                <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                  <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مباشر</div>
+                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.direct)}</div>
+                </div>
+                <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                  <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>غير مباشر</div>
+                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.indirect)}</div>
+                </div>
+              </div>
+            </SectionCard>
+          ))}
+        </div>
+
+        {showForm && (
+          <form onSubmit={submit} className="no-print mt-6">
+            <SectionCard title={editingId ? "تعديل بند مرتبات" : "بند مرتبات جديد"}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Field label="الشهر" required><TextInput type="month" value={form.month} onChange={set("month")} required /></Field>
+                <Field label="الجهة" required><Select value={form.source} onChange={set("source")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+                <Field label="نوع المرتب" required>
+                  <Select value={form.salaryType} onChange={set("salaryType")}>
+                    <option value="driver">سائق / عامل معدة (تكلفة مباشرة)</option>
+                    <option value="indirect">مشرف أو محاسب (مجمع تكلفة يُوزّع)</option>
                   </Select>
                 </Field>
-              )}
-              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+                <Field label="اسم الموظف" required><TextInput value={form.employeeName} onChange={set("employeeName")} required placeholder="اسم السائق أو الموظف" /></Field>
+                {form.salaryType === "driver" && (
+                  <Field label="كود المعدة" required>
+                    <Select value={form.equipmentCode} onChange={set("equipmentCode")} required>
+                      <option value="">اختر كود المعدة</option>
+                      {codeOptions.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}
+                    </Select>
+                  </Field>
+                )}
+                <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+              </div>
+              <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                <button type="button" onClick={cancel} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+              </div>
+            </SectionCard>
+          </form>
+        )}
+
+        {salaries.length === 0 ? (
+          <SectionCard className="mt-6"><EmptyState icon={Wallet} title="لا توجد بنود مرتبات مسجلة بعد" /></SectionCard>
+        ) : (
+          <SectionCard className="mt-6" title={`السجل (${filtered.length} من ${salaries.length})`}>
+            <div className="no-print mb-4 relative">
+              <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو كود المعدة أو الجهة أو الشهر..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border }} />
             </div>
-            <div className="flex justify-end mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: COLORS.cream }}>
+                    {["الشهر", "الجهة", "النوع", "اسم الموظف", "كود المعدة", "المبلغ", ""].map((h) => (
+                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((s) => (
+                    <tr key={s.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{s.month}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{s.source}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {isDirect(s) ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.successBg, color: COLORS.success }}>مباشر</span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>غير مباشر</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{s.employeeName || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{isDirect(s) ? s.equipmentCode : "—"}</td>
+                      <td className="px-4 py-2.5 tabular-nums font-bold">{fmtMoney(s.amount)}</td>
+                      <td className="px-4 py-2.5 no-print">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => startEdit(s)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                          <button onClick={() => onDelete(s.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: COLORS.slate }}>لا توجد نتائج مطابقة للبحث</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </SectionCard>
-        </form>
-      )}
-
-      {salaries.length === 0 ? (
-        <SectionCard><EmptyState icon={Wallet} title="لا توجد بنود مرتبات مسجلة بعد" /></SectionCard>
-      ) : (
-        <SectionCard title={`السجل (${salaries.length})`}>
-          <div className="overflow-x-auto -mx-5">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: COLORS.cream }}>
-                  {["الشهر", "الجهة", "النوع", "اسم الموظف", "كود المعدة", "المبلغ", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[...salaries].sort((a, b) => (b.month || "").localeCompare(a.month || "")).map((s) => (
-                  <tr key={s.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{s.month}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{s.source}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">
-                      {isDirect(s) ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.successBg, color: COLORS.success }}>مباشر</span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>غير مباشر</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{s.employeeName || "—"}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{isDirect(s) ? s.equipmentCode : "—"}</td>
-                    <td className="px-4 py-2.5 tabular-nums font-bold">{fmtMoney(s.amount)}</td>
-                    <td className="px-4 py-2.5"><button onClick={() => onDelete(s.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -3156,45 +3236,45 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
         }), { maint: 0, cards: 0, fuel: 0, oil: 0, driverSalary: 0, direct: 0, shareOther: 0, shareSalary: 0, share: 0, cost: 0, revenue: 0, net: 0 });
         return (
           <SectionCard key={g.owner} title={`${g.owner} (${g.list.length} معدة)`}>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>كارتات</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.cards)}</div>
+            <div className="profit-summary-grid mb-4">
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>كارتات</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.cards)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات صيانة</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.maint)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات صيانة</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.maint)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات سولار</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.fuel)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات سولار</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.fuel)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات زيوت</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.oil)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات زيوت</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.oil)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مرتبات مباشرة</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.driverSalary)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مرتب مباشر</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.driverSalary)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مرتبات غير مباشرة</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.shareSalary)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مرتب غير مباشر</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.shareSalary)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات أخرى غير مباشرة</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.shareOther)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات أخرى</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.shareOther)}</div>
               </div>
-              <div className="p-3 rounded-lg text-center" style={{ background: gTotals.net >= 0 ? COLORS.successBg : COLORS.dangerBg }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>صافي الربح</div>
-                <div className="text-sm font-extrabold tabular-nums" style={{ color: gTotals.net >= 0 ? COLORS.success : COLORS.danger }}>{fmtMoney(gTotals.net)}</div>
+              <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: gTotals.net >= 0 ? COLORS.successBg : COLORS.dangerBg }}>
+                <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>صافي الربح</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: gTotals.net >= 0 ? COLORS.success : COLORS.danger }}>{fmtMoney(gTotals.net)}</div>
               </div>
             </div>
             <div className="overflow-x-auto -mx-5">
               <table className="w-full text-sm profit-table">
                 <thead>
                   <tr style={{ background: COLORS.cream }}>
-                    {["كود المعدة", "كارتات", "مصروفات صيانة", "مصروفات سولار", "مصروفات زيوت", "مرتبات مباشرة", "إجمالي مباشر", "مرتبات غير مباشرة", "مصروفات أخرى غير مباشرة", "إجمالي غير مباشر", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
+                    {["كود المعدة", "كارتات", "صيانة", "سولار", "زيوت", "مرتب مباشر", "إجمالي مباشر", "مرتب غير مباشر", "مصروفات أخرى", "إجمالي غير مباشر", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
                       <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate, minWidth: i === 0 ? 320 : 90 }}>{h}</th>
                     ))}
                   </tr>
@@ -4097,18 +4177,36 @@ function PrintView({ custodies, custodyTotals, expenses }) {
   const items = expenses.filter((e) => e.custodyId === custodyId);
   const totals = custodyTotals[custodyId] || { spent: 0, available: 0, remaining: 0 };
 
+  const mergeKey = (code) => (code ? looseKey(normCode(code)) : "");
+
+  const sortForMerge = (rows) => {
+    const withIdx = rows.map((r, i) => ({ r, i, key: mergeKey(r.equipmentCode) }));
+    const firstIndex = {};
+    withIdx.forEach(({ key, i }) => { if (key && !(key in firstIndex)) firstIndex[key] = i; });
+    withIdx.sort((a, b) => {
+      const oa = a.key ? firstIndex[a.key] : a.i;
+      const ob = b.key ? firstIndex[b.key] : b.i;
+      if (oa !== ob) return oa - ob;
+      if (a.key && a.key === b.key) return (a.r.date || "").localeCompare(b.r.date || "");
+      return a.i - b.i;
+    });
+    return withIdx.map((x) => x.r);
+  };
+
   const withMergeInfo = (rows) => rows.map((row, i) => {
-    const isNewGroup = i === 0 || rows[i - 1].equipmentCode !== row.equipmentCode || !row.equipmentCode;
+    const key = mergeKey(row.equipmentCode);
+    const prevKey = i > 0 ? mergeKey(rows[i - 1].equipmentCode) : "";
+    const isNewGroup = i === 0 || !key || prevKey !== key;
     let span = 1;
-    if (isNewGroup && row.equipmentCode) {
-      for (let j = i + 1; j < rows.length && rows[j].equipmentCode === row.equipmentCode; j++) span++;
+    if (isNewGroup && key) {
+      for (let j = i + 1; j < rows.length && mergeKey(rows[j].equipmentCode) === key; j++) span++;
     }
     return { ...row, _mergeStart: isNewGroup, _mergeSpan: span };
   });
 
   const grouped = CATEGORIES.map((cat) => ({
     cat,
-    rows: withMergeInfo(items.filter((e) => e.category === cat)),
+    rows: withMergeInfo(sortForMerge(items.filter((e) => e.category === cat))),
   })).filter((g) => g.rows.length > 0);
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
