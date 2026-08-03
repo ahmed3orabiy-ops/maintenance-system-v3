@@ -10,8 +10,9 @@ import {
   Building2, Fuel, ClipboardList, CheckCircle2, UploadCloud, FileSpreadsheet,
   MapPin, BarChart3, Filter, ShieldCheck, Loader2, Printer, ArrowLeft, Sparkles, Pencil, ListChecks, Menu, Sun, Moon,
 } from "lucide-react";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
 /* ============================================================
    الرموز والثوابت
@@ -81,6 +82,99 @@ function classifyVehiclePurpose(purpose = "") {
   if (purpose.includes("سائق")) return "مصروفات سائقين";
   return "صيانة دورية";
 }
+
+/* ============================================================
+   تسجيل الدخول والصلاحيات
+============================================================ */
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+    } catch (err) {
+      setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div dir="rtl" className="h-screen flex items-center justify-center px-4" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');`}</style>
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm p-6 rounded-2xl border"
+        style={{ background: COLORS.paper, borderColor: COLORS.border, boxShadow: "0 8px 30px -10px rgba(16,26,46,0.2)" }}
+      >
+        <div className="text-center mb-6">
+          <div className="font-extrabold text-lg mb-1" style={{ color: COLORS.ink }}>قسم الصيانة والتشغيل</div>
+          <div className="text-xs" style={{ color: COLORS.slate }}>سجّل الدخول للمتابعة</div>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold mb-1 block" style={{ color: COLORS.slate }}>البريد الإلكتروني</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg text-sm border"
+              style={{ borderColor: COLORS.border }}
+              dir="ltr"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold mb-1 block" style={{ color: COLORS.slate }}>كلمة المرور</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg text-sm border"
+              style={{ borderColor: COLORS.border }}
+              dir="ltr"
+            />
+          </div>
+          {error && <div className="text-xs font-semibold" style={{ color: COLORS.danger }}>{error}</div>}
+          <button
+            type="submit"
+            disabled={busy}
+            className="w-full py-2.5 rounded-lg text-sm font-bold text-white"
+            style={{ background: COLORS.navy, opacity: busy ? 0.6 : 1 }}
+          >
+            {busy ? "جاري الدخول..." : "دخول"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function AccessDenied() {
+  return (
+    <div dir="rtl" className="h-screen flex items-center justify-center px-4" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
+      <div className="w-full max-w-sm p-6 rounded-2xl border text-center" style={{ background: COLORS.paper, borderColor: COLORS.border }}>
+        <div className="font-extrabold text-lg mb-2" style={{ color: COLORS.ink }}>لا يوجد صلاحية لحسابك</div>
+        <div className="text-sm mb-4" style={{ color: COLORS.slate }}>تواصل مع مدير النظام لتفعيل صلاحيتك.</div>
+        <button
+          onClick={() => signOut(auth)}
+          className="px-4 py-2 rounded-lg text-sm font-bold text-white"
+          style={{ background: COLORS.navy }}
+        >
+          تسجيل خروج
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 /* ============================================================
    التخزين
@@ -311,6 +405,30 @@ function exportToExcel({ expenses, custodies, revenues }) {
    التطبيق
 ============================================================ */
 export default function App() {
+  const [authUser, setAuthUser] = useState(undefined); // undefined = جاري الفحص، null = مفيش دخول
+  const [role, setRole] = useState(undefined); // undefined = جاري الفحص، null = مفيش صلاحية
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setAuthUser(u || null);
+      if (!u) setRole(null);
+    });
+    return () => unsub();
+  }, []);
+  useEffect(() => {
+    if (!authUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", authUser.uid));
+        if (cancelled) return;
+        setRole(snap.exists() ? snap.data().role || null : null);
+      } catch (e) {
+        if (!cancelled) setRole(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [authUser]);
+
   const [expenses, saveExpenses, expensesLoaded] = useStorage("expenses", []);
   const [custodies, saveCustodies, custodiesLoaded] = useStorage("custodies", []);
   const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
@@ -596,6 +714,45 @@ export default function App() {
     { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
   ];
 
+  if (authUser === undefined || (authUser && role === undefined)) {
+    return (
+      <div className="h-screen flex items-center justify-center" style={{ background: COLORS.cream }}>
+        <div className="text-sm font-semibold" style={{ color: COLORS.slate }}>جاري التحقق من الدخول...</div>
+      </div>
+    );
+  }
+  if (!authUser) return <LoginScreen />;
+  if (role !== "admin" && role !== "oils") return <AccessDenied />;
+
+  if (role === "oils") {
+    return (
+      <div dir="rtl" className="h-screen flex flex-col overflow-hidden" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');`}</style>
+        <div className="flex items-center justify-between px-4 md:px-8 py-3 border-b" style={{ background: COLORS.paper, borderColor: COLORS.border }}>
+          <div className="font-extrabold text-sm" style={{ color: COLORS.ink }}>الزيوت والفلاتر</div>
+          <button
+            onClick={() => signOut(auth)}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+            style={{ background: COLORS.navy }}
+          >
+            تسجيل خروج
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {!oilLoaded ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-sm font-semibold" style={{ color: COLORS.slate }}>جاري تحميل البيانات...</div>
+            </div>
+          ) : (
+            <div className="max-w-6xl mx-auto px-4 md:px-8 py-6 md:py-8">
+              <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div dir="rtl" className="h-screen flex overflow-hidden" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
       <style>{`
@@ -678,13 +835,20 @@ export default function App() {
             );
           })}
         </nav>
-        <div className="px-3 pb-3">
+        <div className="px-3 pb-3 space-y-2">
           <button
             onClick={() => exportToExcel({ expenses, custodies, revenues })}
             className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition"
             style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.85)" }}
           >
             <FileSpreadsheet size={15} /> تصدير كل البيانات لإكسل
+          </button>
+          <button
+            onClick={() => signOut(auth)}
+            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition"
+            style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.85)" }}
+          >
+            تسجيل خروج
           </button>
         </div>
         <div className="px-5 py-4 border-t border-white/10 text-[11px] text-white/40">
