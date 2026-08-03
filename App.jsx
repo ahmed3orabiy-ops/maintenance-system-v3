@@ -371,10 +371,10 @@ export default function App() {
     showToast("تم تعديل بند الصرف");
   };
 
-  const acknowledgePendingExpense = (id) => {
+  const updateExpenseLoaded = (id, loadedAmount) => {
     pushUndo("expenses", expenses);
-    saveExpenses(expenses.map((e) => (e.id === id ? { ...e, pendingAck: true } : e)));
-    showToast("تم تسجيل إن البند اتحمّل");
+    saveExpenses(expenses.map((e) => (e.id === id ? { ...e, loadedAmount } : e)));
+    showToast("تم تحديث المبلغ المحمّل");
   };
 
   const addRevenue = (entry) => {
@@ -728,7 +728,7 @@ export default function App() {
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
             {view === "salaries" && <SalariesView salaries={salaries} onAdd={addSalary} onDelete={deleteSalary} />}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
-            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onAcknowledgePending={acknowledgePendingExpense} onUpdateSalaryLoaded={updateSalaryLoaded} />}
+            {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
           </div>
@@ -4039,13 +4039,31 @@ function PrintView({ custodies, custodyTotals, expenses }) {
   );
 }
 
-function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, onAcknowledgePending, onUpdateSalaryLoaded }) {
+function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, onUpdateExpenseLoaded, onUpdateSalaryLoaded }) {
   const [loadedInputs, setLoadedInputs] = useState({});
+  const [expenseLoadedInputs, setExpenseLoadedInputs] = useState({});
   const deficitCustodies = custodies.filter((c) => (custodyTotals[c.id]?.remaining || 0) < 0);
 
   const pendingExpenses = useMemo(
-    () => expenses.filter((e) => isPendingCode(e.equipmentCode) && !e.pendingAck),
+    () =>
+      expenses
+        .filter((e) => isPendingCode(e.equipmentCode))
+        .filter((e) => {
+          const amount = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+          const loaded = Number(e.loadedAmount) || 0;
+          return amount - loaded > 0;
+        }),
     [expenses]
+  );
+
+  const pendingSalaries = useMemo(
+    () =>
+      salaries.filter((s) => {
+        const amount = Number(s.amount) || 0;
+        const loaded = Number(s.loadedAmount) || 0;
+        return amount - loaded > 0;
+      }),
+    [salaries]
   );
 
   const missingData = expenses.filter((e) => !e.category || !e.purpose || !e.custodyId);
@@ -4097,24 +4115,39 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, on
           <div className="space-y-2">
             {pendingExpenses.map((e) => {
               const amount = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+              const loaded = Number(e.loadedAmount) || 0;
+              const remaining = amount - loaded;
+              const inputVal = expenseLoadedInputs[e.id] !== undefined ? expenseLoadedInputs[e.id] : loaded;
               return (
-                <div key={e.id} className="flex items-center justify-between gap-3 p-3 rounded-lg" style={{ background: COLORS.cream }}>
-                  <div className="flex items-start gap-2 text-sm flex-1">
+                <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                  <div className="flex items-start gap-2 text-sm flex-1 min-w-[200px]">
                     <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" style={{ color: COLORS.slate }} />
                     <div>
                       <span style={{ color: COLORS.ink }}>{e.purpose || "بند بدون وصف"}</span>
-                      <span style={{ color: COLORS.slate }}> — {e.source || "غير محدد"} — بقيمة </span>
+                      <span style={{ color: COLORS.slate }}> — {e.source || "غير محدد"} — الإجمالي </span>
                       <b className="tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(amount)}</b>
-                      <span style={{ color: COLORS.slate }}> — لسه مش محمّلة على أي كود معدة.</span>
+                      <span style={{ color: COLORS.slate }}> — المتبقي </span>
+                      <b className="tabular-nums" style={{ color: remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(remaining)}</b>
                     </div>
                   </div>
-                  <button
-                    onClick={() => onAcknowledgePending(e.id)}
-                    className="px-3 py-2 rounded-lg text-xs font-bold text-white flex-shrink-0 flex items-center gap-1.5"
-                    style={{ background: COLORS.success }}
-                  >
-                    <CheckCircle2 size={14} /> تم التحميل
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs" style={{ color: COLORS.slate }}>تم تحميل:</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={inputVal}
+                      onChange={(ev) => setExpenseLoadedInputs((m) => ({ ...m, [e.id]: ev.target.value }))}
+                      className="w-28 px-2 py-1.5 rounded-lg text-sm border text-center"
+                      style={{ borderColor: COLORS.border }}
+                    />
+                    <button
+                      onClick={() => onUpdateExpenseLoaded(e.id, Number(inputVal) || 0)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                      style={{ background: COLORS.gold, color: COLORS.navy }}
+                    >
+                      حفظ
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -4123,13 +4156,13 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, on
       </SectionCard>
 
       <SectionCard title="متابعة تحميل المرتبات على المعدات">
-        {salaries.length === 0 ? (
+        {pendingSalaries.length === 0 ? (
           <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: COLORS.success }}>
-            <CheckCircle2 size={16} /> لا توجد بنود مرتبات مسجّلة
+            <CheckCircle2 size={16} /> لا توجد بنود مرتبات معلّقة حاليًا
           </div>
         ) : (
           <div className="space-y-2">
-            {salaries.map((s) => {
+            {pendingSalaries.map((s) => {
               const amount = Number(s.amount) || 0;
               const loaded = Number(s.loadedAmount) || 0;
               const remaining = amount - loaded;
