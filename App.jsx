@@ -331,6 +331,13 @@ export default function App() {
     } catch (e) {}
     return "home";
   });
+  const [isEmbedded] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).has("view");
+    } catch (e) {
+      return false;
+    }
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(typeof window !== "undefined" ? window.innerWidth >= 768 : true);
   useEffect(() => {
@@ -622,7 +629,7 @@ export default function App() {
       )}
 
       {/* الشريط الجانبي */}
-      {showSidebar && (
+      {showSidebar && !isEmbedded && (
       <aside
         className={isDesktop ? "w-64 shrink-0 flex flex-col text-white" : "w-64 shrink-0 flex flex-col text-white fixed inset-y-0 right-0 z-30"}
         style={{ background: COLORS.navy }}
@@ -690,7 +697,7 @@ export default function App() {
       <main className="flex-1 min-w-0 overflow-y-auto">
         <div className="sticky top-0 z-10 flex items-center justify-between px-4 md:px-8 py-3 border-b" style={{ background: "rgba(247,244,237,0.9)", backdropFilter: "blur(6px)", borderColor: COLORS.border }}>
           <div className="flex items-center gap-2">
-            {!isDesktop && (
+            {!isDesktop && !isEmbedded && (
               <>
                 <button onClick={() => setSidebarOpen(true)} className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: COLORS.navy }}>
                   <Menu size={18} className="text-white" />
