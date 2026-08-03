@@ -3150,11 +3150,11 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                   {g.list.map((r) => (
                     <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
                       <td className="px-3 py-2.5 font-semibold whitespace-nowrap" style={{ minWidth: 280 }}>
-                        <div className="flex items-center gap-2">
-                          <span style={{ display: "inline-block", minWidth: 100 }}>{r.code}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span style={{ display: "inline-block" }}>{r.code}</span>
                           {r.type ? (
                             <span
-                              className="inline-flex items-center justify-center px-2 py-1 rounded text-[9px] font-bold text-white whitespace-nowrap"
+                              className="inline-flex items-center justify-center px-2 py-1 rounded text-[9px] font-bold text-white whitespace-nowrap flex-shrink-0"
                               style={{ background: typeBadgeColor(r.type), minWidth: 70 }}
                             >
                               {r.type}
