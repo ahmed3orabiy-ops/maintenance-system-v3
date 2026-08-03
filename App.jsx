@@ -2136,7 +2136,7 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState("append");
 
-  const empty = { date: todayISO(), equipmentCode: "", equipmentType: "", location: "", itemType: OIL_ITEM_TYPES[0], quantity: "", unitPrice: "", notes: "" };
+  const empty = { date: todayISO(), equipmentCode: "", equipmentType: "", location: "", itemType: "", quantity: "", unitPrice: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -2325,9 +2325,10 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
               <Field label="النوع"><TextInput value={form.equipmentType} onChange={set("equipmentType")} placeholder="مثال: حفار" /></Field>
               <Field label="الموقع"><TextInput value={form.location} onChange={set("location")} placeholder="اختياري" /></Field>
               <Field label="الصنف" required>
-                <Select value={form.itemType} onChange={set("itemType")}>
-                  {OIL_ITEM_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </Select>
+                <TextInput list="oil-item-types" value={form.itemType} onChange={set("itemType")} required placeholder="اكتب اسم الصنف" />
+                <datalist id="oil-item-types">
+                  {OIL_ITEM_TYPES.map((t) => <option key={t} value={t} />)}
+                </datalist>
               </Field>
               <Field label="الكمية" required><TextInput type="number" step="0.01" value={form.quantity} onChange={set("quantity")} required placeholder="0" /></Field>
               <Field label="سعر الوحدة" required><TextInput type="number" step="0.01" value={form.unitPrice} onChange={set("unitPrice")} required placeholder="0" /></Field>
