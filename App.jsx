@@ -909,7 +909,7 @@ export default function App() {
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
-            {view === "salaries" && <SalariesView salaries={salaries} onAdd={addSalary} onDelete={deleteSalary} />}
+            {view === "salaries" && <SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onDelete={deleteSalary} />}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
@@ -963,7 +963,7 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "oils", label: "الزيوت والفلاتر", desc: "مسحوبات الزيوت والفلاتر، محمّلة كمصروف مباشر على المعدات", icon: Wrench, color: "#6D4C41" },
     { key: "fuelAnalysis", label: "تحليل السولار", desc: "معدل الاستهلاك، التكلفة، والاتجاه الشهري", icon: BarChart3, color: "#00695C" },
     { key: "equipmentCodes", label: "أكواد المعدات", desc: "قائمة مرجعية بكل المعدات ومالكها وموقعها", icon: ListChecks, color: "#6A4A2E" },
-    { key: "salaries", label: "المرتبات", desc: "إجمالي شهري لكل جهة (بدون تفصيل موظفين)", icon: Wallet, color: "#5B4A8A" },
+    { key: "salaries", label: "المرتبات", desc: "مرتبات سائقين (مباشرة على المعدات) ومشرفين ومحاسبين (موزّعة)", icon: Wallet, color: "#5B4A8A" },
     { key: "print", label: "طباعة عهدة", desc: "نموذج تصفية عهدة رسمي جاهز للطباعة", icon: Printer, color: "#9C7A1E" },
     { key: "alerts", label: "تنبيهات ومراجعة", desc: "عهد بعجز، صيانة متأخرة، وجودة البيانات", icon: AlertTriangle, color: COLORS.danger },
     { key: "import", label: "استيراد من إكسل", desc: "ارفع ملف واستورد كل بياناتك دفعة واحدة", icon: UploadCloud, color: "#1565C0" },
@@ -2778,20 +2778,28 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
 /* ============================================================
    المرتبات
 ============================================================ */
-function SalariesView({ salaries, onAdd, onDelete }) {
+function SalariesView({ salaries, equipmentCodes, onAdd, onDelete }) {
   const [showForm, setShowForm] = useState(false);
-  const empty = { month: todayISO().slice(0, 7), source: SOURCES[0], amount: "" };
+  const empty = { month: todayISO().slice(0, 7), source: SOURCES[0], salaryType: "driver", employeeName: "", equipmentCode: "", amount: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const codeOptions = useMemo(
+    () => equipmentCodes.filter((c) => c.owner === form.source).filter((c) => !isCostPoolCode(c.code)),
+    [equipmentCodes, form.source]
+  );
+
   const submit = (e) => {
     e.preventDefault();
-    onAdd(form);
+    onAdd(form.salaryType === "driver" ? form : { ...form, equipmentCode: "" });
     setForm(empty);
     setShowForm(false);
   };
 
+  const isDirect = (s) => s.salaryType === "driver" && s.equipmentCode;
   const total = salaries.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalDirect = salaries.filter(isDirect).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalIndirect = total - totalDirect;
   const bySource = SOURCES.map((s) => ({
     source: s,
     total: salaries.filter((r) => r.source === s).reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
@@ -2801,7 +2809,7 @@ function SalariesView({ salaries, onAdd, onDelete }) {
     <div className="space-y-6">
       <Header
         title="المرتبات"
-        sub="مبلغ إجمالي شهري لكل جهة (بدون تفصيل موظفين)"
+        sub="مرتبات السائقين بيتحملوا مباشرة على كود المعدة، ومرتبات المشرفين والمحاسبين بتتحط كمجمع تكلفة يتوزّع على المعدات"
         action={
           <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
             {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند مرتبات جديد"}
@@ -2809,10 +2817,12 @@ function SalariesView({ salaries, onAdd, onDelete }) {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <KPICard label="إجمالي المرتبات الكلي" value={fmtMoney(total)} icon={Wallet} />
+        <KPICard label="مرتبات مباشرة (سائقين)" value={fmtMoney(totalDirect)} tone="gold" icon={Wallet} />
+        <KPICard label="مرتبات غير مباشرة (مشرفين ومحاسبين)" value={fmtMoney(totalIndirect)} tone="gold" icon={Wallet} />
         {bySource.map((b) => (
-          <KPICard key={b.source} label={`مرتبات ${b.source}`} value={fmtMoney(b.total)} tone="gold" icon={Wallet} />
+          <KPICard key={b.source} label={`مرتبات ${b.source}`} value={fmtMoney(b.total)} icon={Wallet} />
         ))}
       </div>
 
@@ -2822,7 +2832,22 @@ function SalariesView({ salaries, onAdd, onDelete }) {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="الشهر" required><TextInput type="month" value={form.month} onChange={set("month")} required /></Field>
               <Field label="الجهة" required><Select value={form.source} onChange={set("source")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
-              <Field label="المبلغ الإجمالي" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+              <Field label="نوع المرتب" required>
+                <Select value={form.salaryType} onChange={set("salaryType")}>
+                  <option value="driver">سائق / عامل معدة (تكلفة مباشرة)</option>
+                  <option value="indirect">مشرف أو محاسب (مجمع تكلفة يُوزّع)</option>
+                </Select>
+              </Field>
+              <Field label="اسم الموظف" required><TextInput value={form.employeeName} onChange={set("employeeName")} required placeholder="اسم السائق أو الموظف" /></Field>
+              {form.salaryType === "driver" && (
+                <Field label="كود المعدة" required>
+                  <Select value={form.equipmentCode} onChange={set("equipmentCode")} required>
+                    <option value="">اختر كود المعدة</option>
+                    {codeOptions.map((c) => <option key={c.id} value={c.code}>{c.code}</option>)}
+                  </Select>
+                </Field>
+              )}
+              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
             </div>
             <div className="flex justify-end mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
@@ -2839,7 +2864,7 @@ function SalariesView({ salaries, onAdd, onDelete }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: COLORS.cream }}>
-                  {["الشهر", "الجهة", "المبلغ", ""].map((h) => (
+                  {["الشهر", "الجهة", "النوع", "اسم الموظف", "كود المعدة", "المبلغ", ""].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
                   ))}
                 </tr>
@@ -2849,6 +2874,15 @@ function SalariesView({ salaries, onAdd, onDelete }) {
                   <tr key={s.id} className="border-t" style={{ borderColor: COLORS.border }}>
                     <td className="px-4 py-2.5 whitespace-nowrap">{s.month}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">{s.source}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {isDirect(s) ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.successBg, color: COLORS.success }}>مباشر</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>غير مباشر</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">{s.employeeName || "—"}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">{isDirect(s) ? s.equipmentCode : "—"}</td>
                     <td className="px-4 py-2.5 tabular-nums font-bold">{fmtMoney(s.amount)}</td>
                     <td className="px-4 py-2.5"><button onClick={() => onDelete(s.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
                   </tr>
@@ -2889,6 +2923,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     fuelRecords.forEach((r) => { const nc = normCode(r.code); if (nc) allRaw.push({ nc, fromRegistry: false }); });
     oilRecords.forEach((r) => { const nc = normCode(r.equipmentCode); if (nc) allRaw.push({ nc, fromRegistry: false }); });
     revenues.forEach((r) => { const nc = normCode(r.equipmentCode); if (nc) allRaw.push({ nc, fromRegistry: false }); });
+    salaries.forEach((s) => { if (s.salaryType === "driver" && s.equipmentCode) { const nc = normCode(s.equipmentCode); if (nc) allRaw.push({ nc, fromRegistry: false }); } });
 
     allRaw.forEach(({ nc, fromRegistry }) => {
       const lk = looseKey(nc);
@@ -2902,7 +2937,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       const lk = looseKey(nc);
       return groups[lk] ? groups[lk].canonical : nc;
     };
-  }, [equipmentCodes, expenses, fuelRecords, oilRecords, revenues]);
+  }, [equipmentCodes, expenses, fuelRecords, oilRecords, revenues, salaries]);
 
   const ownerByCode = useMemo(() => {
     const map = {};
@@ -2967,8 +3002,9 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     fuelRecords.forEach((r) => { const rc = resolveCode(r.code); if (rc) realCodes.add(rc); });
     oilRecords.forEach((r) => { const rc = resolveCode(r.equipmentCode); if (rc) realCodes.add(rc); });
     revenues.forEach((r) => { const rc = resolveCode(r.equipmentCode); if (rc) realCodes.add(rc); });
+    salaries.forEach((s) => { if (s.salaryType === "driver" && s.equipmentCode) { const rc = resolveCode(s.equipmentCode); if (rc) realCodes.add(rc); } });
 
-    const maintCost = {}, cardsCost = {}, fuelCost = {}, oilCost = {}, revenue = {};
+    const maintCost = {}, cardsCost = {}, fuelCost = {}, oilCost = {}, driverSalaryCost = {}, revenue = {};
     const classifyPurpose = (purpose, isVehicleCode) => {
       const p = String(purpose || "");
       if (/كارت|ميزان|موازين/.test(p)) return "cards";
@@ -3001,23 +3037,30 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       if (!rc) return;
       revenue[rc] = (revenue[rc] || 0) + (Number(r.total) || 0);
     });
+    salaries.forEach((s) => {
+      if (s.salaryType !== "driver" || !s.equipmentCode) return;
+      const rc = resolveCode(s.equipmentCode);
+      if (!rc) return;
+      driverSalaryCost[rc] = (driverSalaryCost[rc] || 0) + (Number(s.amount) || 0);
+    });
 
-    // التكلفة الغير مباشرة = مجمع التكلفة فقط (المرتبات مستبعدة، وبتتعرض كبند إجمالي منفصل)
-    // والسيارات مستبعدة نهائيًا من التوزيع والقاعدة الحسابية
-    const poolByOwner = {}, salaryByOwner = {}, totalDirectByOwner = {};
+    // التكلفة الغير مباشرة = مجمع التكلفة (مصروفات أخرى) + مرتبات المشرفين والمحاسبين (مرتبات غير مباشرة)
+    // مرتبات السائقين تُحمّل مباشرة على كود المعدة بتاعهم، والسيارات مستبعدة نهائيًا من التوزيع
+    const poolByOwner = {}, indirectSalaryByOwner = {}, revenueByOwner = {};
     SOURCES.forEach((s) => {
       const poolCode = poolCodeByOwner[s];
       poolByOwner[s] = poolCode
         ? expenses.filter((e) => normCode(e.equipmentCode) === poolCode).reduce((sum, e) => sum + (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0), 0)
         : 0;
-      salaryByOwner[s] = salaries.filter((x) => x.source === s).reduce((sum, x) => sum + (Number(x.amount) || 0), 0);
-      totalDirectByOwner[s] = 0;
+      indirectSalaryByOwner[s] = salaries
+        .filter((x) => x.source === s && !(x.salaryType === "driver" && x.equipmentCode))
+        .reduce((sum, x) => sum + (Number(x.amount) || 0), 0);
+      revenueByOwner[s] = 0;
     });
     realCodes.forEach((code) => {
       if (vehicleCodes.has(code)) return;
       const owner = ownerByCode[code];
-      const direct = (maintCost[code] || 0) + (cardsCost[code] || 0) + (fuelCost[code] || 0) + (oilCost[code] || 0);
-      if (owner && SOURCES.includes(owner)) totalDirectByOwner[owner] += direct;
+      if (owner && SOURCES.includes(owner)) revenueByOwner[owner] += (revenue[code] || 0);
     });
 
     return [...realCodes].map((code) => {
@@ -3026,13 +3069,18 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       const cards = cardsCost[code] || 0;
       const fuel = fuelCost[code] || 0;
       const oil = oilCost[code] || 0;
-      const direct = maint + cards + fuel + oil;
+      const driverSalary = driverSalaryCost[code] || 0;
+      const direct = maint + cards + fuel + oil + driverSalary;
       const isVehicle = vehicleCodes.has(code);
-      const ownerDirectTotal = totalDirectByOwner[owner] || 0;
-      const share = !isVehicle && ownerDirectTotal > 0 && SOURCES.includes(owner) ? (poolByOwner[owner] || 0) * (direct / ownerDirectTotal) : 0;
-      const totalCost = direct + share;
       const rev = revenue[code] || 0;
-      return { code, owner, isVehicle, type: typeByCode[code] || "", maint, cards, fuel, oil, direct, share, totalCost, revenue: rev, net: rev - totalCost };
+      // قاعدة التوزيع: الأعلى إيراد، الأعلى نصيب من التكلفة الغير مباشرة
+      const ownerRevenueTotal = revenueByOwner[owner] || 0;
+      const distributable = !isVehicle && ownerRevenueTotal > 0 && SOURCES.includes(owner);
+      const shareOther = distributable ? (poolByOwner[owner] || 0) * (rev / ownerRevenueTotal) : 0;
+      const shareSalary = distributable ? (indirectSalaryByOwner[owner] || 0) * (rev / ownerRevenueTotal) : 0;
+      const share = shareOther + shareSalary;
+      const totalCost = direct + share;
+      return { code, owner, isVehicle, type: typeByCode[code] || "", maint, cards, fuel, oil, driverSalary, direct, shareOther, shareSalary, share, totalCost, revenue: rev, net: rev - totalCost };
     }).sort((a, b) => {
       const typeCompare = String(a.type || "").localeCompare(String(b.type || ""), "ar");
       if (typeCompare !== 0) return typeCompare;
@@ -3041,12 +3089,11 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
   }, [expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes, ownerByCode, typeByCode, poolCodeByOwner, resolveCode, vehicleCodes]);
 
   const totals = rows.reduce((acc, r) => ({
-    maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
-    share: acc.share + r.share, cost: acc.cost + r.totalCost,
+    maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil,
+    driverSalary: acc.driverSalary + r.driverSalary, direct: acc.direct + r.direct,
+    shareOther: acc.shareOther + r.shareOther, shareSalary: acc.shareSalary + r.shareSalary, share: acc.share + r.share, cost: acc.cost + r.totalCost,
     revenue: acc.revenue + r.revenue, net: acc.net + r.net,
-  }), { maint: 0, cards: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
-
-  const totalSalaries = salaries.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  }), { maint: 0, cards: 0, fuel: 0, oil: 0, driverSalary: 0, direct: 0, shareOther: 0, shareSalary: 0, share: 0, cost: 0, revenue: 0, net: 0 });
 
   if (rows.length === 0) {
     return (
@@ -3067,7 +3114,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
     <div className="space-y-6">
       <Header
         title="ربحية المعدات"
-        sub="الإيراد ناقص التكلفة المباشرة (صيانة + سولار) ناقص نصيبها من مجمع التكلفة الموزّع على المعدات الثقيلة بس (السيارات والمرتبات مستبعدين من التوزيع)"
+        sub="الإيراد ناقص التكلفة المباشرة (صيانة + سولار + زيوت + مرتبات سائقين) ناقص نصيبها من التكلفة الغير مباشرة (مرتبات مشرفين ومحاسبين + مصروفات أخرى)، موزّعة بحسب نسبة كل معدة من إجمالي الإيراد — الأعلى إيرادًا يتحمّل أكبر نصيب (السيارات مستبعدة من التوزيع)"
         action={
           <div className="no-print flex flex-wrap gap-2 items-center">
             <Select value={printOwner} onChange={(e) => setPrintOwner(e.target.value)} className="!w-auto">
@@ -3088,30 +3135,28 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
         <KPICard label="مصروفات صيانة" value={fmtMoney(totals.maint)} tone="gold" icon={Wrench} />
         <KPICard label="مصروفات سولار" value={fmtMoney(totals.fuel)} tone="gold" icon={Fuel} />
         <KPICard label="مصروفات زيوت وفلاتر" value={fmtMoney(totals.oil)} tone="gold" icon={Wrench} />
-        <KPICard label="تكلفة غير مباشرة (مجمع التكلفة)" value={fmtMoney(totals.share)} icon={Wallet} />
+        <KPICard label="مرتبات مباشرة (سائقين)" value={fmtMoney(totals.driverSalary)} tone="gold" icon={Wallet} />
+      </div>
+      <div className="no-print grid grid-cols-2 md:grid-cols-3 gap-4">
+        <KPICard label="مرتبات غير مباشرة (مشرفين ومحاسبين)" value={fmtMoney(totals.shareSalary)} icon={Wallet} />
+        <KPICard label="مصروفات أخرى غير مباشرة" value={fmtMoney(totals.shareOther)} icon={Wallet} />
+        <KPICard label="إجمالي التكلفة الغير مباشرة" value={fmtMoney(totals.share)} tone="gold" icon={Wallet} />
       </div>
       <div className="no-print grid grid-cols-2 gap-4">
-        <KPICard label="إجمالي التكلفة (كل الجهات، غير شامل المرتبات)" value={fmtMoney(totals.cost)} tone="gold" icon={Wallet} />
+        <KPICard label="إجمالي التكلفة (كل الجهات، شامل كل المرتبات)" value={fmtMoney(totals.cost)} tone="gold" icon={Wallet} />
         <KPICard label="صافي الربح الكلي" value={fmtMoney(totals.net)} icon={totals.net >= 0 ? TrendingUp : TrendingDown} />
-      </div>
-
-      <div className="flex items-center gap-3 p-4 rounded-xl" style={{ background: COLORS.cream, border: `1px solid ${COLORS.border}` }}>
-        <Wallet size={18} style={{ color: COLORS.slate }} />
-        <div className="text-sm">
-          <span style={{ color: COLORS.slate }}>تنبيه: إجمالي المرتبات </span>
-          <span className="font-bold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(totalSalaries)}</span>
-          <span style={{ color: COLORS.slate }}> — البيانات في الجدول التالي لا تشمل تكلفة المرتبات، وهي بند إجمالي منفصل غير موزّع على المعدات.</span>
-        </div>
       </div>
 
       {ownerGroups.map((g) => {
         const gTotals = g.list.reduce((acc, r) => ({
-          maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil, direct: acc.direct + r.direct,
-          share: acc.share + r.share, cost: acc.cost + r.totalCost, revenue: acc.revenue + r.revenue, net: acc.net + r.net,
-        }), { maint: 0, cards: 0, fuel: 0, oil: 0, direct: 0, share: 0, cost: 0, revenue: 0, net: 0 });
+          maint: acc.maint + r.maint, cards: acc.cards + r.cards, fuel: acc.fuel + r.fuel, oil: acc.oil + r.oil,
+          driverSalary: acc.driverSalary + r.driverSalary, direct: acc.direct + r.direct,
+          shareOther: acc.shareOther + r.shareOther, shareSalary: acc.shareSalary + r.shareSalary, share: acc.share + r.share,
+          cost: acc.cost + r.totalCost, revenue: acc.revenue + r.revenue, net: acc.net + r.net,
+        }), { maint: 0, cards: 0, fuel: 0, oil: 0, driverSalary: 0, direct: 0, shareOther: 0, shareSalary: 0, share: 0, cost: 0, revenue: 0, net: 0 });
         return (
           <SectionCard key={g.owner} title={`${g.owner} (${g.list.length} معدة)`}>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-4">
               <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>كارتات</div>
                 <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.cards)}</div>
@@ -3129,8 +3174,16 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                 <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.oil)}</div>
               </div>
               <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
-                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>تكلفة غير مباشرة</div>
-                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.share)}</div>
+                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مرتبات مباشرة</div>
+                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.driverSalary)}</div>
+              </div>
+              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مرتبات غير مباشرة</div>
+                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.shareSalary)}</div>
+              </div>
+              <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
+                <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مصروفات أخرى غير مباشرة</div>
+                <div className="text-sm font-extrabold tabular-nums">{fmtMoney(gTotals.shareOther)}</div>
               </div>
               <div className="p-3 rounded-lg text-center" style={{ background: gTotals.net >= 0 ? COLORS.successBg : COLORS.dangerBg }}>
                 <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>صافي الربح</div>
@@ -3141,7 +3194,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
               <table className="w-full text-sm profit-table">
                 <thead>
                   <tr style={{ background: COLORS.cream }}>
-                    {["كود المعدة", "كارتات", "مصروفات صيانة", "مصروفات سولار", "مصروفات زيوت", "إجمالي مباشر", "تكلفة غير مباشرة", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
+                    {["كود المعدة", "كارتات", "مصروفات صيانة", "مصروفات سولار", "مصروفات زيوت", "مرتبات مباشرة", "إجمالي مباشر", "مرتبات غير مباشرة", "مصروفات أخرى غير مباشرة", "إجمالي غير مباشر", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
                       <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate, minWidth: i === 0 ? 320 : 90 }}>{h}</th>
                     ))}
                   </tr>
@@ -3168,7 +3221,10 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.maint)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.fuel)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.oil)}</td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.driverSalary)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.direct)}</td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{r.isVehicle ? "—" : fmtMoney(r.shareSalary)}</td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{r.isVehicle ? "—" : fmtMoney(r.shareOther)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{r.isVehicle ? "—" : fmtMoney(r.share)}</td>
                       <td className="px-3 py-2.5 tabular-nums font-semibold whitespace-nowrap">{fmtMoney(r.totalCost)}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.revenue)}</td>
