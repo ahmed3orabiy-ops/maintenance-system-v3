@@ -1600,14 +1600,15 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
    عهد فرعية (مشرفين الصيانة) — عهدة نقدية شخصية بتتصفّى تدريجيًا
 ============================================================ */
 function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdateSub, onDeleteSub, onAddClearance, onUpdateClearance, onDeleteClearance }) {
+  const [mode, setMode] = useState("register"); // register | clear
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
   const [q, setQ] = useState("");
   const emptySub = { supervisorName: "", date: todayISO(), amountGiven: "", notes: "" };
   const [form, setForm] = useState(emptySub);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  const [selectedId, setSelectedId] = useState("");
   const emptyClearance = { date: todayISO(), amount: "", description: "" };
   const [clearanceForm, setClearanceForm] = useState(emptyClearance);
   const [editingClearanceId, setEditingClearanceId] = useState(null);
@@ -1634,10 +1635,10 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
   };
   const cancelClearanceForm = () => { setEditingClearanceId(null); setClearanceForm(emptyClearance); };
 
-  const submitClearance = (e, subId) => {
+  const submitClearance = (e) => {
     e.preventDefault();
     if (editingClearanceId) onUpdateClearance(editingClearanceId, clearanceForm);
-    else onAddClearance({ ...clearanceForm, subCustodyId: subId });
+    else onAddClearance({ ...clearanceForm, subCustodyId: selectedId });
     cancelClearanceForm();
   };
 
@@ -1657,22 +1658,38 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
 
   const handlePrint = () => window.print();
 
+  const selectedCustody = subCustodies.find((c) => c.id === selectedId) || null;
+  const selectedTotals = selectedId ? (totals[selectedId] || { given: 0, cleared: 0, remaining: 0 }) : null;
+  const selectedItems = selectedId ? clearances.filter((x) => x.subCustodyId === selectedId).sort((a, b) => (b.date || "").localeCompare(a.date || "")) : [];
+
   return (
     <div className="space-y-6">
       <Header
         title="عهد فرعية — مشرفين الصيانة"
-        sub="عهدة نقدية شخصية لكل مشرف، بتتسجّل عليها بنود التصفية أول بأول عشان تعرف باقيله كام"
+        sub="مستقلة تمامًا عن حسابات التكلفة والربحية — بس لمتابعة العهدة النقدية الشخصية لكل مشرف"
         action={
-          <div className="no-print flex flex-wrap gap-2 items-center">
-            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-              <Printer size={16} /> طباعة
-            </button>
-            <button onClick={() => (showForm ? cancelForm() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
-              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "عهدة فرعية جديدة"}
-            </button>
-          </div>
+          <button onClick={handlePrint} className="no-print px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+            <Printer size={16} /> طباعة
+          </button>
         }
       />
+
+      <div className="no-print flex gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+        <button
+          onClick={() => setMode("register")}
+          className="px-5 py-2 rounded-lg text-sm font-bold transition"
+          style={{ background: mode === "register" ? COLORS.navy : "transparent", color: mode === "register" ? "white" : COLORS.slate }}
+        >
+          تسجيل عهدة جديدة
+        </button>
+        <button
+          onClick={() => setMode("clear")}
+          className="px-5 py-2 rounded-lg text-sm font-bold transition"
+          style={{ background: mode === "clear" ? COLORS.navy : "transparent", color: mode === "clear" ? "white" : COLORS.slate }}
+        >
+          تصفية عهدة
+        </button>
+      </div>
 
       <div id="print-area">
         <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -1681,127 +1698,161 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
           <KPICard label="إجمالي المتبقي" value={fmtMoney(grand.remaining)} tone="gold" icon={Wallet} />
         </div>
 
-        {showForm && (
-          <form onSubmit={submitSub} className="no-print mt-6">
-            <SectionCard title={editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Field label="اسم المشرف" required><TextInput value={form.supervisorName} onChange={set("supervisorName")} required placeholder="اسم مشرف الصيانة" /></Field>
-                <Field label="تاريخ المنح" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
-                <Field label="المبلغ الممنوح" required><TextInput type="number" step="0.01" value={form.amountGiven} onChange={set("amountGiven")} required placeholder="0" /></Field>
-                <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
-              </div>
-              <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
-                <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
-              </div>
-            </SectionCard>
-          </form>
+        {mode === "register" && (
+          <>
+            <div className="no-print mt-6 flex justify-end">
+              <button onClick={() => (showForm ? cancelForm() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
+                {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "عهدة فرعية جديدة"}
+              </button>
+            </div>
+
+            {showForm && (
+              <form onSubmit={submitSub} className="no-print mt-4">
+                <SectionCard title={editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Field label="اسم المشرف" required><TextInput value={form.supervisorName} onChange={set("supervisorName")} required placeholder="اسم مشرف الصيانة" /></Field>
+                    <Field label="تاريخ المنح" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
+                    <Field label="المبلغ الممنوح" required><TextInput type="number" step="0.01" value={form.amountGiven} onChange={set("amountGiven")} required placeholder="0" /></Field>
+                    <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                    <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                    <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+                  </div>
+                </SectionCard>
+              </form>
+            )}
+
+            {subCustodies.length === 0 ? (
+              <SectionCard className="mt-6"><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة بعد" /></SectionCard>
+            ) : (
+              <>
+                <div className="no-print mt-6 relative">
+                  <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم المشرف أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+                </div>
+
+                <SectionCard className="mt-4" title={`العهد المسجّلة (${filtered.length})`}>
+                  <div className="overflow-x-auto -mx-5">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                          {["المشرف", "تاريخ المنح", "الممنوح", "المُصفّى", "المتبقي", "ملاحظات", ""].map((h) => (
+                            <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((c) => {
+                          const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
+                          return (
+                            <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                              <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{c.supervisorName}</td>
+                              <td className="px-4 py-2.5 whitespace-nowrap">{c.date}</td>
+                              <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(t.given)}</td>
+                              <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(t.cleared)}</td>
+                              <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap" style={{ color: t.remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(t.remaining)}</td>
+                              <td className="px-4 py-2.5">{c.notes || "—"}</td>
+                              <td className="px-4 py-2.5 no-print">
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                                  <button onClick={() => onDeleteSub(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {filtered.length === 0 && (
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: COLORS.slate }}>لا توجد نتائج مطابقة للبحث</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </SectionCard>
+              </>
+            )}
+          </>
         )}
 
-        {subCustodies.length === 0 ? (
-          <SectionCard className="mt-6"><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة بعد" /></SectionCard>
-        ) : (
-          <>
-            <div className="no-print mt-6 relative">
-              <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم المشرف أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
-            </div>
+        {mode === "clear" && (
+          <div className="mt-6 space-y-4">
+            <SectionCard title="اختر المشرف">
+              <Select value={selectedId} onChange={(e) => { setSelectedId(e.target.value); cancelClearanceForm(); }}>
+                <option value="">اختر عهدة فرعية...</option>
+                {subCustodies.map((c) => {
+                  const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.supervisorName} — {c.date} — الباقي: {fmtMoney(t.remaining)}
+                    </option>
+                  );
+                })}
+              </Select>
+            </SectionCard>
 
-            <div className="space-y-4 mt-4">
-              {filtered.map((c) => {
-                const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
-                const isExpanded = expandedId === c.id;
-                const items = clearances.filter((x) => x.subCustodyId === c.id).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-                return (
-                  <SectionCard key={c.id}>
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <div className="font-extrabold text-sm" style={{ color: COLORS.ink }}>{c.supervisorName}</div>
-                        <div className="text-xs mt-1" style={{ color: COLORS.slate }}>
-                          تاريخ المنح: {c.date} {c.notes && <span> — {c.notes}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <div className="text-center">
-                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>الممنوح</div>
-                          <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(t.given)}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>المُصفّى</div>
-                          <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(t.cleared)}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>المتبقي</div>
-                          <div className="text-sm font-extrabold tabular-nums" style={{ color: t.remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(t.remaining)}</div>
-                        </div>
-                        <div className="no-print flex items-center gap-1">
-                          <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-                            {isExpanded ? "إخفاء التصفية" : `التصفية (${items.length})`}
-                          </button>
-                          <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                          <button onClick={() => onDeleteSub(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                        </div>
-                      </div>
+            {selectedCustody && (
+              <>
+                <div className="grid grid-cols-3 gap-4">
+                  <KPICard label="الممنوح" value={fmtMoney(selectedTotals.given)} icon={Wallet} />
+                  <KPICard label="المُصفّى" value={fmtMoney(selectedTotals.cleared)} tone="gold" icon={Wallet} />
+                  <KPICard label="المتبقي" value={fmtMoney(selectedTotals.remaining)} tone="gold" icon={Wallet} />
+                </div>
+
+                <form onSubmit={submitClearance} className="no-print">
+                  <SectionCard title={editingClearanceId ? "تعديل بند تصفية" : `تسجيل بند تصفية جديد — ${selectedCustody.supervisorName}`}>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
+                      <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
+                      <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
                     </div>
-
-                    {(isExpanded || items.length > 0) && (
-                      <div className="mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                        {isExpanded && (
-                          <form onSubmit={(e) => submitClearance(e, c.id)} className="no-print mb-4 p-4 rounded-xl" style={{ background: COLORS.cream }}>
-                            <div className="text-xs font-bold mb-3" style={{ color: COLORS.ink }}>{editingClearanceId ? "تعديل بند تصفية" : "تسجيل بند تصفية جديد"}</div>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                              <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
-                              <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
-                              <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
-                            </div>
-                            <div className="flex justify-end gap-2 mt-3">
-                              {editingClearanceId && (
-                                <button type="button" onClick={cancelClearanceForm} className="px-4 py-2 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
-                              )}
-                              <button type="submit" className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ background: COLORS.navy }}>{editingClearanceId ? "حفظ التعديل" : "إضافة"}</button>
-                            </div>
-                          </form>
-                        )}
-                        {items.length === 0 ? (
-                          <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لسه مفيش بنود تصفية مسجّلة</div>
-                        ) : (
-                          <div className="overflow-x-auto -mx-2">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                                  {["التاريخ", "فيم صُرف", "المبلغ", ""].map((h) => (
-                                    <th key={h} className="px-3 py-2 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {items.map((x) => (
-                                  <tr key={x.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                                    <td className="px-3 py-2 whitespace-nowrap">{x.date}</td>
-                                    <td className="px-3 py-2">{x.description}</td>
-                                    <td className="px-3 py-2 tabular-nums font-bold">{fmtMoney(x.amount)}</td>
-                                    <td className="px-3 py-2 no-print">
-                                      <div className="flex items-center gap-1">
-                                        <button onClick={() => { setExpandedId(c.id); startClearanceEdit(x); }} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button>
-                                        <button onClick={() => onDeleteClearance(x.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex justify-end gap-2 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                      {editingClearanceId && (
+                        <button type="button" onClick={cancelClearanceForm} className="px-4 py-2 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                      )}
+                      <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingClearanceId ? "حفظ التعديل" : "إضافة بند التصفية"}</button>
+                    </div>
                   </SectionCard>
-                );
-              })}
-              {filtered.length === 0 && (
-                <SectionCard><div className="text-sm text-center py-6" style={{ color: COLORS.slate }}>لا توجد نتائج مطابقة للبحث</div></SectionCard>
-              )}
-            </div>
-          </>
+                </form>
+
+                <SectionCard title={`بنود التصفية (${selectedItems.length})`}>
+                  {selectedItems.length === 0 ? (
+                    <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لسه مفيش بنود تصفية مسجّلة</div>
+                  ) : (
+                    <div className="overflow-x-auto -mx-5">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                            {["التاريخ", "فيم صُرف", "المبلغ", ""].map((h) => (
+                              <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedItems.map((x) => (
+                            <tr key={x.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                              <td className="px-4 py-2.5 whitespace-nowrap">{x.date}</td>
+                              <td className="px-4 py-2.5">{x.description}</td>
+                              <td className="px-4 py-2.5 tabular-nums font-bold">{fmtMoney(x.amount)}</td>
+                              <td className="px-4 py-2.5 no-print">
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => startClearanceEdit(x)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button>
+                                  <button onClick={() => onDeleteClearance(x.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </SectionCard>
+              </>
+            )}
+
+            {!selectedCustody && subCustodies.length === 0 && (
+              <SectionCard><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة — سجّل عهدة جديدة أول من تاب (تسجيل عهدة جديدة)" /></SectionCard>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -4747,7 +4798,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
                     )}
                     {e._mergeStart && (
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
