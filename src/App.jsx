@@ -4731,6 +4731,8 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [q, setQ] = useState("");
+  const [monthFrom, setMonthFrom] = useState("");
+  const [monthTo, setMonthTo] = useState("");
   const [sourceFilter, setSourceFilter] = useState({}); // { [owner]: "الكل" | مصدر معين }
   const empty = { owner: SOURCES[0], source: SOURCES[0], month: todayISO().slice(0, 7), equipmentCode: "", equipmentType: "", location: "", amount: "", description: "", notes: "" };
   const [form, setForm] = useState(empty);
@@ -4786,9 +4788,16 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
   };
 
   const term = q.trim().toLowerCase();
-  const matches = (r) => !term || [r.equipmentCode, r.description, r.notes, r.equipmentType, r.location].join(" ").toLowerCase().includes(term);
+  const matches = (r) => {
+    if (term && !([r.equipmentCode, r.description, r.notes, r.equipmentType, r.location].join(" ").toLowerCase().includes(term))) return false;
+    const m = r.month || r.startMonth || "";
+    if (monthFrom && (!m || m < monthFrom)) return false;
+    if (monthTo && (!m || m > monthTo)) return false;
+    return true;
+  };
 
   const grand = revenues.filter(matches).reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
+  const handlePrint = () => window.print();
 
   return (
     <div className="space-y-6">
@@ -4796,21 +4805,28 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         title="الإيرادات"
         sub="مقسّمة حسب مالك المعدة الفعلي، ومسجّل مع كل بند مصدر الإيراد — عشان تعرف مثلاً معدات الكيان جالها إيراد كام من هدي الإسلام"
         action={
-          <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
-            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند إيراد جديد"}
-          </button>
+          <div className="no-print flex flex-wrap gap-2">
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+              <Printer size={16} /> طباعة
+            </button>
+            <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند إيراد جديد"}
+            </button>
+          </div>
         }
       />
 
-      <KPICard label="إجمالي الإيرادات" value={fmtMoney(grand)} icon={TrendingUp} />
-
-      <div className="relative">
-        <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو البيان أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+      <div className="no-print grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="relative md:col-span-1">
+          <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو البيان أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+        </div>
+        <TextInput type="month" value={monthFrom} onChange={(e) => setMonthFrom(e.target.value)} placeholder="من شهر" title="من شهر" />
+        <TextInput type="month" value={monthTo} onChange={(e) => setMonthTo(e.target.value)} placeholder="إلى شهر" title="إلى شهر" />
       </div>
 
       {showForm && (
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="no-print">
           <SectionCard title={editingId ? "تعديل بند إيراد" : "بند إيراد جديد"}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="كود المعدة" required>
@@ -4841,10 +4857,13 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         </form>
       )}
 
+      <div id="print-area">
       {revenues.length === 0 ? (
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
       ) : (
-        SOURCES.map((owner) => {
+        <>
+        <KPICard label={term || monthFrom || monthTo ? "إجمالي الإيرادات (حسب الفلتر الحالي)" : "إجمالي الإيرادات"} value={fmtMoney(grand)} icon={TrendingUp} />
+        {SOURCES.map((owner) => {
           const ownerList = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches);
           const activeSourceFilter = sourceFilter[owner] || "الكل";
           const list = ownerList
@@ -4860,12 +4879,12 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
               key={owner}
               title={`معدات ${owner} (${list.length}) — ${fmtMoney(ownerTotal)}`}
               action={
-                <button onClick={() => startAdd(owner)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
                   <Plus size={13} className="inline -mt-0.5" /> إضافة لمعدات {owner}
                 </button>
               }
             >
-              <div className="flex flex-wrap items-center gap-2 mb-4">
+              <div className="no-print flex flex-wrap items-center gap-2 mb-4">
                 <span className="text-xs font-bold" style={{ color: COLORS.slate }}>فلتر حسب مصدر الإيراد:</span>
                 <button
                   onClick={() => setSourceFilter((f) => ({ ...f, [owner]: "الكل" }))}
@@ -4911,7 +4930,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                           <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(r.amount ?? r.total)}</td>
                           <td className="px-4 py-2.5">{r.description || "—"}</td>
                           <td className="px-4 py-2.5">{r.notes || "—"}</td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-2.5 no-print">
                             <div className="flex items-center gap-1">
                               <button onClick={() => startEdit(r)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
                               <button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
@@ -4925,8 +4944,10 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
               )}
             </SectionCard>
           );
-        })
+        })}
+        </>
       )}
+      </div>
     </div>
   );
 }
