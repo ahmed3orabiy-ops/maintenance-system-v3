@@ -18,18 +18,20 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebas
    الرموز والثوابت
 ============================================================ */
 const LIGHT_COLORS = {
-  navy: "#0E1826",
-  navyLight: "#1A2740",
-  navyDeep: "#080E18",
-  gold: "#B08D42",
-  goldSoft: "#DCC488",
-  goldDark: "#8C6F30",
+  navy: "#0B1524",
+  navyLight: "#1E3050",
+  navyDeep: "#050A12",
+  gold: "#B9862A",
+  goldSoft: "#E8C978",
+  goldDark: "#8A5F1E",
+  teal: "#0E6E64",
+  tealSoft: "#CFEAE6",
   cream: "#F6F4EE",
   paper: "#FFFFFF",
-  ink: "#181F2E",
-  slate: "#5E6779",
+  ink: "#141A26",
+  slate: "#5B6579",
   slateLight: "#98A1B0",
-  border: "#E7E2D6",
+  border: "#E3DDCE",
   success: "#276B48",
   successBg: "#E5F1EA",
   danger: "#AC4238",
@@ -37,18 +39,20 @@ const LIGHT_COLORS = {
 };
 
 const DARK_COLORS = {
-  navy: "#0A0F1A",
-  navyLight: "#151F32",
-  navyDeep: "#05080F",
-  gold: "#CBA458",
+  navy: "#080D16",
+  navyLight: "#16233A",
+  navyDeep: "#04070C",
+  gold: "#D9AE5C",
   goldSoft: "#8A6B2E",
-  goldDark: "#E4C57E",
+  goldDark: "#EFCB86",
+  teal: "#2CA79A",
+  tealSoft: "#123330",
   cream: "#0C121D",
-  paper: "#131B2A",
+  paper: "#121A29",
   ink: "#EAE7DE",
   slate: "#98A3B4",
   slateLight: "#707B8D",
-  border: "#242E42",
+  border: "#232D42",
   success: "#4CAF7D",
   successBg: "#173327",
   danger: "#E0796C",
@@ -224,7 +228,7 @@ function useStorage(key, initial, shared = true) {
 ============================================================ */
 function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
   const isGold = tone === "gold";
-  const bg = isGold ? COLORS.paper : `linear-gradient(155deg, ${COLORS.navy}, ${COLORS.navyDeep})`;
+  const bg = isGold ? `linear-gradient(165deg, ${COLORS.paper}, ${COLORS.cream})` : `linear-gradient(155deg, ${COLORS.navy}, ${COLORS.navyDeep})`;
   const textColor = isGold ? COLORS.ink : "white";
   const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.62)";
   const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.55)";
@@ -234,11 +238,11 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
         background: bg,
         borderRadius: 16,
         border: isGold ? `1px solid ${COLORS.border}` : "none",
-        boxShadow: isGold ? "0 1px 2px rgba(16,26,46,0.05), 0 10px 24px -14px rgba(16,26,46,0.14)" : "0 10px 28px -12px rgba(8,14,24,0.45)",
+        boxShadow: isGold ? "0 2px 4px rgba(16,26,46,0.06), 0 16px 32px -16px rgba(16,26,46,0.22)" : "0 16px 36px -14px rgba(4,7,12,0.55)",
       }}
-      className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden transition-transform duration-200 hover:-translate-y-0.5"
+      className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden transition-transform duration-200 hover:-translate-y-1"
     >
-      <div className="absolute top-0 right-0 left-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.goldSoft})`, opacity: isGold ? 0.9 : 0.6 }} />
+      <div className="absolute top-0 right-0 left-0 h-[4px]" style={{ background: `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.teal})` }} />
       {!isGold && (
         <>
           <div className="absolute -left-8 -top-8 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.04)" }} />
@@ -250,7 +254,7 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
         {Icon && (
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: isGold ? `${COLORS.goldSoft}30` : "rgba(255,255,255,0.10)", border: isGold ? `1px solid ${COLORS.goldSoft}55` : "1px solid rgba(255,255,255,0.08)" }}
+            style={{ background: isGold ? `${COLORS.goldSoft}35` : "rgba(255,255,255,0.10)", border: isGold ? `1px solid ${COLORS.gold}66` : "1px solid rgba(255,255,255,0.08)" }}
           >
             <Icon size={15} style={{ color: isGold ? COLORS.gold : "rgba(255,255,255,0.9)" }} />
           </div>
@@ -265,13 +269,13 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
 function SectionCard({ title, action, children, className = "" }) {
   return (
     <div
-      className={`rounded-[18px] border ${className}`}
-      style={{ borderColor: COLORS.border, background: COLORS.paper, boxShadow: "0 1px 2px rgba(16,26,46,0.04), 0 10px 24px -14px rgba(16,26,46,0.12)" }}
+      className={`rounded-[18px] border overflow-hidden ${className}`}
+      style={{ borderColor: COLORS.border, background: COLORS.paper, boxShadow: "0 2px 4px rgba(16,26,46,0.05), 0 16px 32px -18px rgba(16,26,46,0.20)", borderRight: `4px solid ${COLORS.gold}` }}
     >
       {title && (
-        <div className="flex items-center justify-between px-5 md:px-6 pt-4 pb-3 border-b" style={{ borderColor: COLORS.border }}>
+        <div className="flex items-center justify-between px-5 md:px-6 pt-4 pb-3 border-b" style={{ borderColor: COLORS.border, background: `${COLORS.cream}80` }}>
           <h3 className="font-bold text-[13.5px] flex items-center gap-2.5" style={{ color: COLORS.ink }}>
-            <span className="w-1 h-4 rounded-full" style={{ background: `linear-gradient(180deg, ${COLORS.gold}, ${COLORS.goldDark})` }} />
+            <span className="w-1 h-4 rounded-full" style={{ background: `linear-gradient(180deg, ${COLORS.gold}, ${COLORS.teal})` }} />
             {title}
           </h3>
           {action}
@@ -851,7 +855,7 @@ export default function App() {
                 onClick={() => { setView(n.key); setSidebarOpen(false); }}
                 className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-all text-right"
                 style={{
-                  background: active ? `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.goldDark})` : "transparent",
+                  background: active ? `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.teal})` : "transparent",
                   color: active ? COLORS.navyDeep : "rgba(255,255,255,0.68)",
                   boxShadow: active ? "0 6px 16px -6px rgba(176,141,66,0.5)" : "none",
                 }}
@@ -911,8 +915,8 @@ export default function App() {
                 <ArrowLeft size={14} /> تراجع عن آخر تعديل
               </button>
             )}
-            <div className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: COLORS.gold, background: `${COLORS.goldSoft}22`, border: `1px solid ${COLORS.goldSoft}44` }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.success }} />
+            <div className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: COLORS.teal, background: `${COLORS.tealSoft}` }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.teal }} />
               <span className="hidden sm:inline">متصل ومحفوظ تلقائيًا</span>
             </div>
           </div>
@@ -1468,9 +1472,9 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["العهدة", "الجهة", "الفترة", "متاح", "مصروف", "المتبقي", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1697,9 +1701,9 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["التاريخ", "العهدة", "التصنيف", "كود المعدة", "الموقع", "الغرض من الصرف", "الإجمالي", ""].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1826,9 +1830,9 @@ function MaintenanceLogView({ expenses }) {
             <div className="overflow-x-auto -mx-5">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: COLORS.cream }}>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                     {["التاريخ", "التصنيف", "الغرض من الصرف", "الموقع", "الإجمالي"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2105,9 +2109,9 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "الإجمالي", "معدل الاستهلاك", ""].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2390,9 +2394,9 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["التاريخ", "كود المعدة", "النوع", "الصنف", "الكمية", "الإجمالي", ""].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2764,9 +2768,9 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["كود المعدة", "النوع", "الماركة", "المالك", "الموقع", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -3081,9 +3085,9 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
             <div className="overflow-x-auto -mx-5">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: COLORS.cream }}>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                     {["الشهر", "الجهة", "النوع", "اسم الموظف", "كود المعدة", "المبلغ", ""].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
+                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -3420,9 +3424,9 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
             <div className="overflow-x-auto -mx-5">
               <table className="w-full text-sm profit-table">
                 <thead>
-                  <tr style={{ background: COLORS.cream }}>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                     {["كود المعدة", "كارتات", "صيانة", "سولار", "زيوت", "مرتب مباشر", "إجمالي مباشر", "مرتب غير مباشر", "مصروفات أخرى", "إجمالي غير مباشر", "إجمالي التكلفة", "الإيراد", "صافي الربح"].map((h, i) => (
-                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate, minWidth: i === 0 ? 320 : 90 }}>{h}</th>
+                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)", minWidth: i === 0 ? 320 : 90 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -3576,10 +3580,10 @@ function EquipmentView({ expenses, revenues }) {
               <div className="overflow-x-auto -mx-5">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ background: COLORS.cream }}>
+                    <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                       {["كود المعدة", "النوع", "الماركة", "عدد مرات الصيانة", "إجمالي التكلفة", "متوسط التكلفة",
                         ...(hasRevenue ? ["الإيراد", "صافي الربح"] : []), "آخر تاريخ", "الترتيب"].map((h) => (
-                        <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                        <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -3621,10 +3625,10 @@ function EquipmentView({ expenses, revenues }) {
               <div className="overflow-x-auto -mx-5">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ background: COLORS.cream }}>
+                    <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                       {["كود السيارة", "النوع", "الماركة", "كارتات وموازين", "مصروفات سائقين", "صيانة دورية", "الإجمالي الكلي",
                         ...(hasRevenue ? ["الإيراد", "صافي الربح"] : []), "آخر تاريخ", "الترتيب"].map((h) => (
-                        <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                        <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -4126,9 +4130,9 @@ function RevenueAnalysisView({ revenues, expenses }) {
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["كود المعدة", "الإيراد", "التكلفة", "صافي الربح"].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -4276,9 +4280,9 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onDelete }) {
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["كود المعدة", "الجهة المستأجرة", "شهر البداية", "عدد الشهور", "سعر الشهر", "الإجمالي", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -4716,9 +4720,9 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, on
           <div className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ background: COLORS.cream }}>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                   {["كود المعدة", "آخر صيانة", "عدد الأيام"].map((h) => (
-                    <th key={h} className="px-4 py-2 text-right text-xs font-bold" style={{ color: COLORS.slate }}>{h}</th>
+                    <th key={h} className="px-4 py-2 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
