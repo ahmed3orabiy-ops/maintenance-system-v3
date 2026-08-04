@@ -442,6 +442,7 @@ export default function App() {
   const [custodies, saveCustodies, custodiesLoaded] = useStorage("custodies", []);
   const [subCustodies, saveSubCustodies, subCustodiesLoaded] = useStorage("subCustodies", []);
   const [subCustodyClearances, saveSubCustodyClearances, subClearancesLoaded] = useStorage("subCustodyClearances", []);
+  const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
   const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
@@ -499,29 +500,60 @@ export default function App() {
     showToast("تم التراجع عن آخر تعديل");
   };
 
+  const logAudit = (action, entity, description) => {
+    saveAuditLog([...auditLog, {
+      id: uid(),
+      timestamp: new Date().toISOString(),
+      userEmail: (authUser && authUser.email) || "غير معروف",
+      action,
+      entity,
+      description,
+    }]);
+  };
+
+  const isCustodyApproved = (custodyId) => custodies.some((c) => c.id === custodyId && c.approved);
+
   const addExpense = (entry) => {
+    if (isCustodyApproved(entry.custodyId)) {
+      showToast("العهدة المختارة معتمدة ومقفولة — مينفعش تضيف بنود صرف عليها", "danger");
+      return;
+    }
     pushUndo("expenses", expenses);
     const next = [...expenses, { ...entry, location: cleanText(entry.location), id: uid() }];
     saveExpenses(next);
+    logAudit("إضافة", "مصروف", `${entry.purpose || "بند صرف"} — ${fmtMoney((Number(entry.cash) || 0) + (Number(entry.transfer) || 0) + (Number(entry.check) || 0))}`);
     showToast("تم حفظ بند الصرف بنجاح");
   };
 
   const deleteExpense = (id) => {
+    const e = expenses.find((x) => x.id === id);
+    if (e && isCustodyApproved(e.custodyId)) {
+      showToast("البند ده تابع لعهدة معتمدة ومقفولة — مينفعش يتحذف", "danger");
+      return;
+    }
     pushUndo("expenses", expenses);
     saveExpenses(expenses.filter((e) => e.id !== id));
+    logAudit("حذف", "مصروف", e ? `${e.purpose || "بند صرف"} — ${fmtMoney((Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0))}` : id);
     showToast("تم حذف البند", "danger");
   };
 
   const updateExpense = (id, updates) => {
+    const e = expenses.find((x) => x.id === id);
+    if (e && isCustodyApproved(e.custodyId)) {
+      showToast("البند ده تابع لعهدة معتمدة ومقفولة — مينفعش يتعدّل", "danger");
+      return;
+    }
     pushUndo("expenses", expenses);
     const cleaned = updates.location !== undefined ? { ...updates, location: cleanText(updates.location) } : updates;
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, ...cleaned } : e)));
+    logAudit("تعديل", "مصروف", e ? (e.purpose || "بند صرف") : id);
     showToast("تم تعديل بند الصرف");
   };
 
   const updateExpenseLoaded = (id, loadedAmount) => {
     pushUndo("expenses", expenses);
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, loadedAmount } : e)));
+    logAudit("تعديل", "مصروف", `تحديث المبلغ المحمّل إلى ${fmtMoney(loadedAmount)}`);
     showToast("تم تحديث المبلغ المحمّل");
   };
 
@@ -529,12 +561,15 @@ export default function App() {
     pushUndo("revenues", revenues);
     const total = (Number(entry.months) || 0) * (Number(entry.monthlyRate) || 0);
     saveRevenues([...revenues, { ...entry, location: cleanText(entry.location), total, id: uid() }]);
+    logAudit("إضافة", "إيراد", `${entry.equipmentCode || "بند إيراد"} — ${fmtMoney(total)}`);
     showToast("تم حفظ بند الإيراد بنجاح");
   };
 
   const deleteRevenue = (id) => {
+    const r = revenues.find((x) => x.id === id);
     pushUndo("revenues", revenues);
     saveRevenues(revenues.filter((r) => r.id !== id));
+    logAudit("حذف", "إيراد", r ? (r.equipmentCode || "بند إيراد") : id);
     showToast("تم حذف بند الإيراد", "danger");
   };
 
@@ -544,12 +579,15 @@ export default function App() {
     const total = (Number(rec.quantity) || 0) * (Number(rec.pricePerLiter) || 0) + (Number(rec.commission) || 0) + (Number(rec.tax) || 0);
     const rate = Number(rec.quantity) ? distance / Number(rec.quantity) : 0;
     saveFuelRecords([...fuelRecords, { ...rec, distance, total, rate, id: uid() }]);
+    logAudit("إضافة", "سولار", `${rec.code || "سجل سولار"} — ${fmtMoney(total)}`);
     showToast("تم حفظ سجل السولار بنجاح");
   };
 
   const deleteFuelRecord = (id) => {
+    const r = fuelRecords.find((x) => x.id === id);
     pushUndo("fuelRecords", fuelRecords);
     saveFuelRecords(fuelRecords.filter((r) => r.id !== id));
+    logAudit("حذف", "سولار", r ? (r.code || "سجل سولار") : id);
     showToast("تم حذف سجل السولار", "danger");
   };
 
@@ -557,6 +595,7 @@ export default function App() {
     pushUndo("fuelRecords", fuelRecords);
     if (mode === "replace") saveFuelRecords(newRecords);
     else saveFuelRecords([...fuelRecords, ...newRecords]);
+    logAudit("استيراد", "سولار", `استيراد ${newRecords.length} سجل (${mode === "replace" ? "استبدال" : "إضافة"})`);
     showToast(`تم استيراد ${newRecords.length} سجل سولار`);
   };
 
@@ -564,12 +603,15 @@ export default function App() {
     pushUndo("oilRecords", oilRecords);
     const total = (Number(rec.quantity) || 0) * (Number(rec.unitPrice) || 0);
     saveOilRecords([...oilRecords, { ...rec, total, equipmentCode: rec.equipmentCode, location: cleanText(rec.location), id: uid() }]);
+    logAudit("إضافة", "زيوت", `${rec.equipmentCode || "سجل زيوت"} — ${fmtMoney(total)}`);
     showToast("تم حفظ مسحوبات الزيوت بنجاح");
   };
 
   const deleteOilRecord = (id) => {
+    const r = oilRecords.find((x) => x.id === id);
     pushUndo("oilRecords", oilRecords);
     saveOilRecords(oilRecords.filter((r) => r.id !== id));
+    logAudit("حذف", "زيوت", r ? (r.equipmentCode || "سجل زيوت") : id);
     showToast("تم حذف السجل", "danger");
   };
 
@@ -577,29 +619,36 @@ export default function App() {
     pushUndo("oilRecords", oilRecords);
     if (mode === "replace") saveOilRecords(newRecords);
     else saveOilRecords([...oilRecords, ...newRecords]);
+    logAudit("استيراد", "زيوت", `استيراد ${newRecords.length} سجل (${mode === "replace" ? "استبدال" : "إضافة"})`);
     showToast(`تم استيراد ${newRecords.length} سجل زيوت وفلاتر`);
   };
 
   const addEquipmentCode = (c) => {
     pushUndo("equipmentCodes", equipmentCodes);
     saveEquipmentCodes([...equipmentCodes, { ...c, location: cleanText(c.location), id: uid() }]);
+    logAudit("إضافة", "كود معدة", c.code || "كود جديد");
     showToast("تم إضافة الكود");
   };
   const updateEquipmentCode = (id, updates) => {
+    const c0 = equipmentCodes.find((x) => x.id === id);
     pushUndo("equipmentCodes", equipmentCodes);
     const cleaned = updates.location !== undefined ? { ...updates, location: cleanText(updates.location) } : updates;
     saveEquipmentCodes(equipmentCodes.map((c) => (c.id === id ? { ...c, ...cleaned } : c)));
+    logAudit("تعديل", "كود معدة", c0 ? c0.code : id);
     showToast("تم تعديل الكود");
   };
   const deleteEquipmentCode = (id) => {
+    const c0 = equipmentCodes.find((x) => x.id === id);
     pushUndo("equipmentCodes", equipmentCodes);
     saveEquipmentCodes(equipmentCodes.filter((c) => c.id !== id));
+    logAudit("حذف", "كود معدة", c0 ? c0.code : id);
     showToast("تم حذف الكود", "danger");
   };
   const bulkImportEquipmentCodes = (newCodes, mode) => {
     pushUndo("equipmentCodes", equipmentCodes);
     if (mode === "replace") saveEquipmentCodes(newCodes);
     else saveEquipmentCodes([...equipmentCodes, ...newCodes]);
+    logAudit("استيراد", "كود معدة", `استيراد ${newCodes.length} كود (${mode === "replace" ? "استبدال" : "إضافة"})`);
     showToast(`تم استيراد ${newCodes.length} كود معدة`);
   };
 
@@ -633,27 +682,34 @@ export default function App() {
       }
     });
     saveEquipmentCodes(cleanedCodes);
+    logAudit("دمج", "كود معدة", `دمج ${oldSpellings.join(", ")} إلى ${canonical}`);
     showToast("تم دمج الكود بنجاح");
   };
 
   const addSalary = (s) => {
     pushUndo("salaries", salaries);
     saveSalaries([...salaries, { ...s, loadedAmount: 0, id: uid() }]);
+    logAudit("إضافة", "مرتب", `${s.employeeName || "بند مرتبات"} — ${fmtMoney(s.amount)}`);
     showToast("تم حفظ بند المرتبات");
   };
   const deleteSalary = (id) => {
+    const s0 = salaries.find((x) => x.id === id);
     pushUndo("salaries", salaries);
     saveSalaries(salaries.filter((s) => s.id !== id));
+    logAudit("حذف", "مرتب", s0 ? (s0.employeeName || "بند مرتبات") : id);
     showToast("تم حذف بند المرتبات", "danger");
   };
   const updateSalary = (id, updates) => {
+    const s0 = salaries.find((x) => x.id === id);
     pushUndo("salaries", salaries);
     saveSalaries(salaries.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+    logAudit("تعديل", "مرتب", s0 ? (s0.employeeName || "بند مرتبات") : id);
     showToast("تم تحديث بند المرتبات");
   };
   const updateSalaryLoaded = (id, loadedAmount) => {
     pushUndo("salaries", salaries);
     saveSalaries(salaries.map((s) => (s.id === id ? { ...s, loadedAmount } : s)));
+    logAudit("تعديل", "مرتب", `تحديث المبلغ المحمّل إلى ${fmtMoney(loadedAmount)}`);
     showToast("تم تحديث المبلغ المحمّل");
   };
 
@@ -661,22 +717,37 @@ export default function App() {
     pushUndo("custodies", custodies);
     const next = [...custodies, { ...c, id: uid() }];
     saveCustodies(next);
+    logAudit("إضافة", "عهدة", c.label || c.source || "عهدة جديدة");
     showToast("تم إضافة العهدة");
   };
 
   const updateCustody = (id, updates) => {
+    const c0 = custodies.find((x) => x.id === id);
+    if (c0 && c0.approved && updates.approved !== false) {
+      showToast("العهدة معتمدة ومقفولة — لازم تلغي الاعتماد الأول عشان تعدّل فيها", "danger");
+      return;
+    }
     pushUndo("custodies", custodies);
     saveCustodies(custodies.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-    showToast("تم تعديل بيانات العهدة");
+    if (updates.approved === true) logAudit("اعتماد", "عهدة", c0 ? (c0.label || c0.source) : id);
+    else if (updates.approved === false) logAudit("إلغاء اعتماد", "عهدة", c0 ? (c0.label || c0.source) : id);
+    else logAudit("تعديل", "عهدة", c0 ? (c0.label || c0.source) : id);
+    showToast(updates.approved === true ? "تم اعتماد العهدة" : updates.approved === false ? "تم إلغاء اعتماد العهدة" : "تم تعديل بيانات العهدة");
   };
 
   const deleteCustody = (id) => {
+    const c0 = custodies.find((x) => x.id === id);
+    if (c0 && c0.approved) {
+      showToast("العهدة معتمدة ومقفولة — لا يمكن حذفها", "danger");
+      return;
+    }
     if (expenses.some((e) => e.custodyId === id)) {
       showToast("لا يمكن حذف عهدة مرتبطة ببنود صرف", "danger");
       return;
     }
     pushUndo("custodies", custodies);
     saveCustodies(custodies.filter((c) => c.id !== id));
+    logAudit("حذف", "عهدة", c0 ? (c0.label || c0.source) : id);
     showToast("تم حذف العهدة", "danger");
   };
 
@@ -693,11 +764,14 @@ export default function App() {
   const addSubCustody = (c) => {
     pushUndo("subCustodies", subCustodies);
     saveSubCustodies([...subCustodies, { ...c, id: uid() }]);
+    logAudit("إضافة", "عهدة فرعية", `${c.supervisorName || "عهدة فرعية"} — ${fmtMoney(c.amountGiven)}`);
     showToast("تم تسجيل العهدة الفرعية");
   };
   const updateSubCustody = (id, updates) => {
+    const c0 = subCustodies.find((x) => x.id === id);
     pushUndo("subCustodies", subCustodies);
     saveSubCustodies(subCustodies.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    logAudit("تعديل", "عهدة فرعية", c0 ? c0.supervisorName : id);
     showToast("تم تعديل العهدة الفرعية");
   };
   const deleteSubCustody = (id) => {
@@ -705,23 +779,28 @@ export default function App() {
       showToast("لا يمكن حذف عهدة فرعية ليها بنود تصفية مسجّلة", "danger");
       return;
     }
+    const c0 = subCustodies.find((x) => x.id === id);
     pushUndo("subCustodies", subCustodies);
     saveSubCustodies(subCustodies.filter((c) => c.id !== id));
+    logAudit("حذف", "عهدة فرعية", c0 ? c0.supervisorName : id);
     showToast("تم حذف العهدة الفرعية", "danger");
   };
   const addSubCustodyClearance = (c) => {
     pushUndo("subCustodyClearances", subCustodyClearances);
     saveSubCustodyClearances([...subCustodyClearances, { ...c, id: uid() }]);
+    logAudit("إضافة", "تصفية عهدة فرعية", `${c.description || "بند تصفية"} — ${fmtMoney(c.amount)}`);
     showToast("تم تسجيل بند التصفية");
   };
   const updateSubCustodyClearance = (id, updates) => {
     pushUndo("subCustodyClearances", subCustodyClearances);
     saveSubCustodyClearances(subCustodyClearances.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    logAudit("تعديل", "تصفية عهدة فرعية", id);
     showToast("تم تعديل بند التصفية");
   };
   const deleteSubCustodyClearance = (id) => {
     pushUndo("subCustodyClearances", subCustodyClearances);
     saveSubCustodyClearances(subCustodyClearances.filter((c) => c.id !== id));
+    logAudit("حذف", "تصفية عهدة فرعية", id);
     showToast("تم حذف بند التصفية", "danger");
   };
   const subCustodyTotals = useMemo(() => {
@@ -749,7 +828,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded;
 
   const NAV = [
     { key: "home", label: "الصفحة الرئيسية", icon: Building2 },
@@ -773,6 +852,7 @@ export default function App() {
     { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
     { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
     { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
+    { key: "auditLog", label: "سجل التعديلات", icon: ListChecks },
   ];
 
   if (authUser === undefined || (authUser && role === undefined)) {
@@ -1008,6 +1088,7 @@ export default function App() {
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
+            {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
         )}
       </main>
@@ -1296,7 +1377,7 @@ function EntryForm({ custodies, custodyTotals, expenses, equipmentCodes, onAdd, 
   };
 
   const total = (Number(form.cash) || 0) + (Number(form.transfer) || 0) + (Number(form.check) || 0);
-  const filteredCustodies = custodies.filter((c) => c.source === form.source);
+  const filteredCustodies = custodies.filter((c) => c.source === form.source && !c.approved);
 
   const submit = (e) => {
     e.preventDefault();
@@ -1534,7 +1615,7 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                  {["العهدة", "الجهة", "الفترة", "متاح", "مصروف", "المتبقي", ""].map((h) => (
+                  {["العهدة", "الجهة", "الفترة", "متاح", "مصروف", "المتبقي", "الحالة", ""].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                   ))}
                 </tr>
@@ -1553,14 +1634,42 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
                       <td className="px-4 py-3 tabular-nums font-bold" style={{ color: deficit ? COLORS.danger : COLORS.success }}>
                         {fmtMoney(t.remaining)}
                       </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {c.approved ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>
+                            <ShieldCheck size={12} /> معتمدة
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>غير معتمدة</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.slate }}>
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}>
-                            <Trash2 size={15} />
-                          </button>
+                          {c.approved ? (
+                            <button
+                              onClick={() => { if (window.confirm("هل تريد إلغاء اعتماد العهدة والسماح بالتعديل عليها مرة أخرى؟")) onUpdate(c.id, { approved: false }); }}
+                              className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border"
+                              style={{ borderColor: COLORS.border, color: COLORS.slate }}
+                            >
+                              إلغاء الاعتماد
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => { if (window.confirm("بعد الاعتماد لن يمكن تعديل أو حذف العهدة أو أي بند صرف مرتبط بيها. هل تريد المتابعة؟")) onUpdate(c.id, { approved: true }); }}
+                                className="px-2.5 py-1.5 rounded-md text-[11px] font-bold"
+                                style={{ background: COLORS.gold, color: COLORS.navy }}
+                              >
+                                اعتماد
+                              </button>
+                              <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.slate }}>
+                                <Pencil size={15} />
+                              </button>
+                              <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}>
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2045,14 +2154,20 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
                       <td className="px-3 py-2.5 text-xs max-w-[220px] truncate" title={e.purpose}>{e.purpose}</td>
                       <td className="px-3 py-2.5 tabular-nums font-semibold whitespace-nowrap">{fmtMoney(total)}</td>
                       <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => setEditing({ ...e })} className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.slate }}>
-                            <Pencil size={14} />
-                          </button>
-                          <button onClick={() => onDelete(e.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                        {custodies.some((c) => c.id === e.custodyId && c.approved) ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded" style={{ background: COLORS.cream, color: COLORS.slate }}>
+                            <ShieldCheck size={12} /> مقفول
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setEditing({ ...e })} className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.slate }}>
+                              <Pencil size={14} />
+                            </button>
+                            <button onClick={() => onDelete(e.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -4025,6 +4140,107 @@ function toISODate(val) {
     return trimmed;
   }
   return "";
+}
+
+/* ============================================================
+   سجل التعديلات
+============================================================ */
+function AuditLogView({ log }) {
+  const [q, setQ] = useState("");
+  const [actionFilter, setActionFilter] = useState("");
+  const [entityFilter, setEntityFilter] = useState("");
+
+  const actions = useMemo(() => [...new Set(log.map((x) => x.action))], [log]);
+  const entities = useMemo(() => [...new Set(log.map((x) => x.entity))], [log]);
+
+  const term = q.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      [...log]
+        .filter((x) => !term || [x.description, x.userEmail].join(" ").toLowerCase().includes(term))
+        .filter((x) => !actionFilter || x.action === actionFilter)
+        .filter((x) => !entityFilter || x.entity === entityFilter)
+        .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || "")),
+    [log, term, actionFilter, entityFilter]
+  );
+
+  const actionColor = (a) => {
+    if (a === "إضافة" || a === "استيراد") return COLORS.success;
+    if (a === "حذف") return COLORS.danger;
+    if (a === "اعتماد") return COLORS.gold;
+    if (a === "إلغاء اعتماد") return COLORS.danger;
+    return COLORS.slate;
+  };
+
+  const fmtWhen = (iso) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("ar-EG", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch (e) {
+      return iso;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Header title="سجل التعديلات" sub="سجل كامل لكل عملية إضافة أو تعديل أو حذف في النظام، مين عملها وإمتى" />
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <KPICard label="إجمالي العمليات المسجّلة" value={fmtNum(log.length)} icon={ListChecks} />
+        <KPICard label="نتائج البحث الحالية" value={fmtNum(filtered.length)} tone="gold" icon={Search} />
+        <KPICard label="عدد الأنواع" value={fmtNum(entities.length)} tone="gold" icon={Database} />
+      </div>
+
+      <SectionCard>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="relative">
+            <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالوصف أو البريد الإلكتروني..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+          </div>
+          <Select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+            <option value="">كل أنواع العمليات</option>
+            {actions.map((a) => <option key={a} value={a}>{a}</option>)}
+          </Select>
+          <Select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)}>
+            <option value="">كل الأقسام</option>
+            {entities.map((e) => <option key={e} value={e}>{e}</option>)}
+          </Select>
+        </div>
+      </SectionCard>
+
+      {filtered.length === 0 ? (
+        <SectionCard><EmptyState icon={ListChecks} title="لا توجد عمليات مسجّلة مطابقة" /></SectionCard>
+      ) : (
+        <SectionCard title={`السجل (${filtered.length})`}>
+          <div className="overflow-x-auto -mx-5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                  {["الوقت", "المستخدم", "العملية", "القسم", "التفاصيل"].map((h) => (
+                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((x) => (
+                  <tr key={x.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-xs" style={{ color: COLORS.slate }}>{fmtWhen(x.timestamp)}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-xs" style={{ color: COLORS.slate }}>{x.userEmail}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold text-white" style={{ background: actionColor(x.action) }}>{x.action}</span>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap font-semibold">{x.entity}</td>
+                    <td className="px-4 py-2.5">{x.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+    </div>
+  );
 }
 
 /* ============================================================
