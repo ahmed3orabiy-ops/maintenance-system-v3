@@ -829,11 +829,24 @@ export default function App() {
         button:active { transform: scale(0.98); }
         input, select, textarea { transition: border-color .15s ease, box-shadow .15s ease; }
         input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 3px ${COLORS.gold}2A; border-color: ${COLORS.gold} !important; }
+        .hover\:bg-gray-50:hover, .hover\:bg-gray-100:hover { background: ${COLORS.cream} !important; }
         @page { size: A4 portrait; margin: 10mm 8mm; }
         .print-only-area { position: absolute; left: -99999px; top: -99999px; }
         .profit-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; }
         .profit-summary-box { flex: 1 1 22%; min-width: 130px; }
         @media print {
+          body, html { background: #FFFFFF !important; }
+          #print-area, #print-area *, .totals-signatures-block, .totals-signatures-block * {
+            background: #FFFFFF !important;
+            color: #101A2E !important;
+            box-shadow: none !important;
+          }
+          #print-area table thead tr, #print-area table tr[style*="background"] {
+            background: #101A2E !important;
+          }
+          #print-area table thead th, #print-area table thead td {
+            color: #FFFFFF !important;
+          }
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
