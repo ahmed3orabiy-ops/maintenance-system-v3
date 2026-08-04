@@ -559,10 +559,36 @@ export default function App() {
 
   const addRevenue = (entry) => {
     pushUndo("revenues", revenues);
-    const total = (Number(entry.months) || 0) * (Number(entry.monthlyRate) || 0);
-    saveRevenues([...revenues, { ...entry, location: cleanText(entry.location), total, id: uid() }]);
-    logAudit("إضافة", "إيراد", `${entry.equipmentCode || "بند إيراد"} — ${fmtMoney(total)}`);
+    const total = Number(entry.amount) || 0;
+    const record = {
+      ...entry,
+      location: cleanText(entry.location),
+      total,
+      startMonth: entry.month, // توافق مع تاب تحليل الإيرادات وربحية المعدات
+      months: 1,
+      monthlyRate: total,
+      id: uid(),
+    };
+    saveRevenues([...revenues, record]);
+    logAudit("إضافة", "إيراد", `${entry.owner || ""} — ${entry.equipmentCode || "بند إيراد"} — ${fmtMoney(total)}`);
     showToast("تم حفظ بند الإيراد بنجاح");
+  };
+
+  const updateRevenue = (id, entry) => {
+    const r0 = revenues.find((x) => x.id === id);
+    pushUndo("revenues", revenues);
+    const total = Number(entry.amount) || 0;
+    saveRevenues(revenues.map((r) => (r.id === id ? {
+      ...r,
+      ...entry,
+      location: cleanText(entry.location),
+      total,
+      startMonth: entry.month,
+      months: 1,
+      monthlyRate: total,
+    } : r)));
+    logAudit("تعديل", "إيراد", r0 ? (r0.equipmentCode || "بند إيراد") : id);
+    showToast("تم تعديل بند الإيراد");
   };
 
   const deleteRevenue = (id) => {
@@ -1072,7 +1098,7 @@ export default function App() {
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
-            {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onDelete={deleteRevenue} />}
+            {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
@@ -1960,6 +1986,12 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
 
             {!selectedCustody && subCustodies.length === 0 && (
               <SectionCard><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة — سجّل عهدة جديدة أول من تاب (تسجيل عهدة جديدة)" /></SectionCard>
+            )}
+            {!selectedCustody && subCustodies.length > 0 && (
+              <div className="text-sm text-center py-8 flex flex-col items-center gap-2" style={{ color: COLORS.slate }}>
+                <Wallet size={28} style={{ color: COLORS.slateLight }} />
+                اختر مشرف من القائمة فوق عشان يظهرلك فورم تسجيل بند التصفية
+              </div>
             )}
           </div>
         )}
@@ -4695,18 +4727,20 @@ function RevenueAnalysisView({ revenues, expenses }) {
   );
 }
 
-function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onDelete }) {
+function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
-  const empty = { equipmentCode: "", equipmentType: "", location: "", renter: "", startMonth: todayISO().slice(0, 7), months: "1", monthlyRate: "", paymentMethod: PAYMENT_METHODS[0], notes: "" };
+  const [editingId, setEditingId] = useState(null);
+  const [q, setQ] = useState("");
+  const empty = { owner: SOURCES[0], month: todayISO().slice(0, 7), equipmentCode: "", equipmentType: "", location: "", amount: "", description: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const knownCodes = useMemo(() => {
     const map = {};
-    equipmentCodes.forEach((c) => { map[normCode(c.code)] = { type: c.type, location: c.location }; });
+    equipmentCodes.forEach((c) => { map[normCode(c.code)] = { type: c.type, location: c.location, owner: c.owner }; });
     expenses.forEach((e) => {
       const nc = normCode(e.equipmentCode);
-      if (nc && !map[nc]) map[nc] = { type: e.equipmentType, location: e.location };
+      if (nc && !map[nc]) map[nc] = { type: e.equipmentType, location: e.location, owner: e.source };
     });
     return map;
   }, [equipmentCodes, expenses]);
@@ -4717,95 +4751,83 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onDelete }) {
     setForm((f) => ({
       ...f,
       equipmentCode: code,
-      equipmentType: known ? known.type : f.equipmentType,
+      equipmentType: known && known.type ? known.type : f.equipmentType,
       location: known && known.location ? known.location : f.location,
+      owner: known && known.owner ? known.owner : f.owner,
     }));
   };
 
-  const total = (Number(form.months) || 0) * (Number(form.monthlyRate) || 0);
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setForm({
+      owner: r.owner || SOURCES[0],
+      month: r.month || r.startMonth || todayISO().slice(0, 7),
+      equipmentCode: r.equipmentCode || "",
+      equipmentType: r.equipmentType || "",
+      location: r.location || "",
+      amount: r.amount ?? r.total ?? "",
+      description: r.description || "",
+      notes: r.notes || "",
+    });
+    setShowForm(true);
+  };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
 
   const submit = (e) => {
     e.preventDefault();
-    onAdd(form);
-    setForm(empty);
-    setShowForm(false);
+    if (editingId) onUpdate(editingId, form);
+    else onAdd(form);
+    cancel();
   };
 
-  const [monthFrom, setMonthFrom] = useState("");
-  const [monthTo, setMonthTo] = useState("");
-  const filteredRevenues = useMemo(() => {
-    return revenues
-      .filter((r) => !monthFrom || (r.startMonth && r.startMonth >= monthFrom))
-      .filter((r) => !monthTo || (r.startMonth && r.startMonth <= monthTo));
-  }, [revenues, monthFrom, monthTo]);
+  const term = q.trim().toLowerCase();
+  const matches = (r) => !term || [r.equipmentCode, r.description, r.notes, r.equipmentType, r.location].join(" ").toLowerCase().includes(term);
 
-  const totalRevenue = filteredRevenues.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const grand = revenues.filter(matches).reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
 
   return (
     <div className="space-y-6">
       <Header
         title="الإيرادات"
-        sub="إيرادات تأجير المعدات على أساس شهري - لحساب صافي الربح في بطاقة أداء المعدات"
+        sub="إيراد تأجير المعدات، مقسّم حسب الجهة المالكة — هدي الإسلام والكيان الهندسي"
         action={
-          <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+          <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
             {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند إيراد جديد"}
           </button>
         }
       />
 
-      <KPICard label={monthFrom || monthTo ? "إجمالي الإيرادات (الفترة المختارة)" : "إجمالي الإيرادات المسجلة"} value={fmtMoney(totalRevenue)} icon={TrendingUp} />
+      <KPICard label="إجمالي الإيرادات" value={fmtMoney(grand)} icon={TrendingUp} />
 
-      <SectionCard title="تحديد فترة">
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="من شهر"><TextInput type="month" value={monthFrom} onChange={(e) => setMonthFrom(e.target.value)} /></Field>
-          <Field label="إلى شهر"><TextInput type="month" value={monthTo} onChange={(e) => setMonthTo(e.target.value)} /></Field>
-        </div>
-      </SectionCard>
+      <div className="relative">
+        <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو البيان أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+      </div>
 
       {showForm && (
         <form onSubmit={submit}>
-          <SectionCard title="بيانات بند الإيراد الشهري">
+          <SectionCard title={editingId ? "تعديل بند إيراد" : "بند إيراد جديد"}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="الجهة المالكة" required>
+                <Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
+              </Field>
+              <Field label="الشهر" required>
+                <TextInput type="month" value={form.month} onChange={set("month")} required />
+              </Field>
               <Field label="كود المعدة" required>
-                <TextInput list="rev-codes" value={form.equipmentCode} onChange={handleCodeChange}
-                  required placeholder="مثال: EX-200-32" />
+                <TextInput list="rev-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
                 <datalist id="rev-codes">{Object.keys(knownCodes).map((c) => <option key={c} value={c} />)}</datalist>
               </Field>
-              <Field label="النوع">
-                <TextInput value={form.equipmentType} onChange={set("equipmentType")} placeholder="مثال: حفار" />
-              </Field>
-              <Field label="الموقع">
-                <TextInput value={form.location} onChange={set("location")} placeholder="مثال: الورشة" />
-              </Field>
-              <Field label="الجهة المستأجرة" required>
-                <TextInput value={form.renter} onChange={set("renter")} required placeholder="اسم الشركة أو الموقع" />
-              </Field>
-
-              <Field label="شهر البداية" required>
-                <TextInput type="month" value={form.startMonth} onChange={set("startMonth")} required />
-              </Field>
-              <Field label="عدد الشهور" required>
-                <TextInput type="number" step="1" min="1" value={form.months} onChange={set("months")} required placeholder="1" />
-              </Field>
-              <Field label="طريقة التحصيل">
-                <Select value={form.paymentMethod} onChange={set("paymentMethod")}>{PAYMENT_METHODS.map((p) => <option key={p}>{p}</option>)}</Select>
-              </Field>
-
-              <Field label="سعر الإيجار الشهري" required>
-                <TextInput type="number" step="0.01" value={form.monthlyRate} onChange={set("monthlyRate")} required placeholder="0" />
-              </Field>
-              <Field label="ملاحظات">
-                <TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" />
-              </Field>
+              <Field label="النوع"><TextInput value={form.equipmentType} onChange={set("equipmentType")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
+              <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
+              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+              <Field label="البيان"><TextInput value={form.description} onChange={set("description")} placeholder="مثال: إيجار شهري" /></Field>
+              <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
             </div>
-
-            <div className="flex items-center justify-between mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
-              <div className="text-sm">
-                <span style={{ color: COLORS.slate }}>الإجمالي ({form.months || 0} شهر × {fmtMoney(form.monthlyRate)}): </span>
-                <span className="font-bold text-lg tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(total)}</span>
-              </div>
+            <div className="flex justify-end mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
-                <Plus size={17} /> حفظ بند الإيراد
+                <Plus size={17} /> {editingId ? "حفظ التعديل" : "حفظ بند الإيراد"}
               </button>
             </div>
           </SectionCard>
@@ -4814,39 +4836,57 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onDelete }) {
 
       {revenues.length === 0 ? (
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
-      ) : filteredRevenues.length === 0 ? (
-        <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات في الفترة دي" /></SectionCard>
       ) : (
-        <SectionCard title={`بنود الإيراد (${filteredRevenues.length})`}>
-          <div className="overflow-x-auto -mx-5">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                  {["كود المعدة", "الجهة المستأجرة", "شهر البداية", "عدد الشهور", "سعر الشهر", "الإجمالي", ""].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[...filteredRevenues].sort((a, b) => (b.startMonth || "").localeCompare(a.startMonth || "")).map((r) => (
-                  <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                    <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{r.equipmentCode}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{r.renter}</td>
-                    <td className="px-4 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.startMonth}</td>
-                    <td className="px-4 py-2.5 tabular-nums">{fmtNum(r.months)}</td>
-                    <td className="px-4 py-2.5 tabular-nums">{fmtMoney(r.monthlyRate)}</td>
-                    <td className="px-4 py-2.5 tabular-nums font-bold">{fmtMoney(r.total)}</td>
-                    <td className="px-4 py-2.5">
-                      <button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}>
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
+        SOURCES.map((owner) => {
+          const list = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => (b.month || b.startMonth || "").localeCompare(a.month || a.startMonth || ""));
+          const ownerTotal = list.reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
+          return (
+            <SectionCard
+              key={owner}
+              title={`إيراد ${owner} (${list.length}) — ${fmtMoney(ownerTotal)}`}
+              action={
+                <button onClick={() => startAdd(owner)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                  <Plus size={13} className="inline -mt-0.5" /> إضافة لـ {owner}
+                </button>
+              }
+            >
+              {list.length === 0 ? (
+                <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود إيراد لـ {owner} حاليًا</div>
+              ) : (
+                <div className="overflow-x-auto -mx-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                        {["الشهر", "كود المعدة", "النوع", "موقع العمل", "المبلغ", "البيان", "ملاحظات", ""].map((h) => (
+                          <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map((r) => (
+                        <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                          <td className="px-4 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.month || r.startMonth}</td>
+                          <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{r.equipmentCode}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{r.equipmentType || "—"}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{r.location || "—"}</td>
+                          <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(r.amount ?? r.total)}</td>
+                          <td className="px-4 py-2.5">{r.description || "—"}</td>
+                          <td className="px-4 py-2.5">{r.notes || "—"}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => startEdit(r)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                              <button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SectionCard>
+          );
+        })
       )}
     </div>
   );
