@@ -4731,7 +4731,8 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [q, setQ] = useState("");
-  const empty = { owner: SOURCES[0], month: todayISO().slice(0, 7), equipmentCode: "", equipmentType: "", location: "", amount: "", description: "", notes: "" };
+  const [sourceFilter, setSourceFilter] = useState({}); // { [owner]: "الكل" | مصدر معين }
+  const empty = { owner: SOURCES[0], source: SOURCES[0], month: todayISO().slice(0, 7), equipmentCode: "", equipmentType: "", location: "", amount: "", description: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -4753,15 +4754,18 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
       equipmentCode: code,
       equipmentType: known && known.type ? known.type : f.equipmentType,
       location: known && known.location ? known.location : f.location,
+      // "المالك" (الجهة المستفيدة الفعلية) بيتاستورد تلقائي من مالك المعدة الحقيقي في قائمة الأكواد،
+      // أما "مصدر الإيراد" فبيتسجّل يدوي لأنه ممكن يكون جهة تانية غير المالك
       owner: known && known.owner ? known.owner : f.owner,
     }));
   };
 
-  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0], source: owner || SOURCES[0] }); setShowForm(true); };
   const startEdit = (r) => {
     setEditingId(r.id);
     setForm({
       owner: r.owner || SOURCES[0],
+      source: r.source || r.owner || SOURCES[0],
       month: r.month || r.startMonth || todayISO().slice(0, 7),
       equipmentCode: r.equipmentCode || "",
       equipmentType: r.equipmentType || "",
@@ -4790,7 +4794,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
     <div className="space-y-6">
       <Header
         title="الإيرادات"
-        sub="إيراد تأجير المعدات، مقسّم حسب الجهة المالكة — هدي الإسلام والكيان الهندسي"
+        sub="مقسّمة حسب مالك المعدة الفعلي، ومسجّل مع كل بند مصدر الإيراد — عشان تعرف مثلاً معدات الكيان جالها إيراد كام من هدي الإسلام"
         action={
           <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
             {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند إيراد جديد"}
@@ -4809,15 +4813,18 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         <form onSubmit={submit}>
           <SectionCard title={editingId ? "تعديل بند إيراد" : "بند إيراد جديد"}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="الجهة المالكة" required>
-                <Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
-              </Field>
-              <Field label="الشهر" required>
-                <TextInput type="month" value={form.month} onChange={set("month")} required />
-              </Field>
               <Field label="كود المعدة" required>
                 <TextInput list="rev-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
                 <datalist id="rev-codes">{Object.keys(knownCodes).map((c) => <option key={c} value={c} />)}</datalist>
+              </Field>
+              <Field label="مالك المعدة (تلقائي)">
+                <Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
+              </Field>
+              <Field label="مصدر الإيراد (الجهة اللي جه منها)" required>
+                <Select value={form.source} onChange={set("source")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
+              </Field>
+              <Field label="الشهر" required>
+                <TextInput type="month" value={form.month} onChange={set("month")} required />
               </Field>
               <Field label="النوع"><TextInput value={form.equipmentType} onChange={set("equipmentType")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
               <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
@@ -4838,26 +4845,55 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
       ) : (
         SOURCES.map((owner) => {
-          const list = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => (b.month || b.startMonth || "").localeCompare(a.month || a.startMonth || ""));
+          const ownerList = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches);
+          const activeSourceFilter = sourceFilter[owner] || "الكل";
+          const list = ownerList
+            .filter((r) => activeSourceFilter === "الكل" || (r.source || r.owner) === activeSourceFilter)
+            .sort((a, b) => (b.month || b.startMonth || "").localeCompare(a.month || a.startMonth || ""));
           const ownerTotal = list.reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
+          const bySource = SOURCES.map((s) => ({
+            source: s,
+            total: ownerList.filter((r) => (r.source || r.owner) === s).reduce((sum, r) => sum + (Number(r.amount ?? r.total) || 0), 0),
+          }));
           return (
             <SectionCard
               key={owner}
-              title={`إيراد ${owner} (${list.length}) — ${fmtMoney(ownerTotal)}`}
+              title={`معدات ${owner} (${list.length}) — ${fmtMoney(ownerTotal)}`}
               action={
                 <button onClick={() => startAdd(owner)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-                  <Plus size={13} className="inline -mt-0.5" /> إضافة لـ {owner}
+                  <Plus size={13} className="inline -mt-0.5" /> إضافة لمعدات {owner}
                 </button>
               }
             >
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <span className="text-xs font-bold" style={{ color: COLORS.slate }}>فلتر حسب مصدر الإيراد:</span>
+                <button
+                  onClick={() => setSourceFilter((f) => ({ ...f, [owner]: "الكل" }))}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                  style={{ background: activeSourceFilter === "الكل" ? COLORS.navy : COLORS.cream, color: activeSourceFilter === "الكل" ? "white" : COLORS.slate }}
+                >
+                  الكل — {fmtMoney(ownerList.reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0))}
+                </button>
+                {bySource.map((b) => (
+                  <button
+                    key={b.source}
+                    onClick={() => setSourceFilter((f) => ({ ...f, [owner]: b.source }))}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background: activeSourceFilter === b.source ? COLORS.navy : COLORS.cream, color: activeSourceFilter === b.source ? "white" : COLORS.slate }}
+                  >
+                    من {b.source} — {fmtMoney(b.total)}
+                  </button>
+                ))}
+              </div>
+
               {list.length === 0 ? (
-                <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود إيراد لـ {owner} حاليًا</div>
+                <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود إيراد مطابقة</div>
               ) : (
                 <div className="overflow-x-auto -mx-5">
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                        {["الشهر", "كود المعدة", "النوع", "موقع العمل", "المبلغ", "البيان", "ملاحظات", ""].map((h) => (
+                        {["الشهر", "كود المعدة", "النوع", "موقع العمل", "مصدر الإيراد", "المبلغ", "البيان", "ملاحظات", ""].map((h) => (
                           <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                         ))}
                       </tr>
@@ -4869,6 +4905,9 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                           <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{r.equipmentCode}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">{r.equipmentType || "—"}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">{r.location || "—"}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>{r.source || r.owner}</span>
+                          </td>
                           <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(r.amount ?? r.total)}</td>
                           <td className="px-4 py-2.5">{r.description || "—"}</td>
                           <td className="px-4 py-2.5">{r.notes || "—"}</td>
