@@ -18,33 +18,37 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebas
    الرموز والثوابت
 ============================================================ */
 const LIGHT_COLORS = {
-  navy: "#101A2E",
-  navyLight: "#1C2C4A",
-  gold: "#C69A3C",
-  goldSoft: "#E7C878",
-  cream: "#F7F4ED",
+  navy: "#0E1826",
+  navyLight: "#1A2740",
+  navyDeep: "#080E18",
+  gold: "#B08D42",
+  goldSoft: "#DCC488",
+  goldDark: "#8C6F30",
+  cream: "#F6F4EE",
   paper: "#FFFFFF",
-  ink: "#1B2333",
-  slate: "#647085",
-  slateLight: "#9AA5B4",
-  border: "#E5E0D3",
-  success: "#2E7A50",
-  successBg: "#E7F3EC",
-  danger: "#B5453A",
-  dangerBg: "#FBEAE8",
+  ink: "#181F2E",
+  slate: "#5E6779",
+  slateLight: "#98A1B0",
+  border: "#E7E2D6",
+  success: "#276B48",
+  successBg: "#E5F1EA",
+  danger: "#AC4238",
+  dangerBg: "#FAEAE8",
 };
 
 const DARK_COLORS = {
-  navy: "#0B1220",
-  navyLight: "#182238",
-  gold: "#D8AE55",
+  navy: "#0A0F1A",
+  navyLight: "#151F32",
+  navyDeep: "#05080F",
+  gold: "#CBA458",
   goldSoft: "#8A6B2E",
-  cream: "#0E1420",
-  paper: "#161E2E",
-  ink: "#EDEAE0",
-  slate: "#9FAAB8",
-  slateLight: "#6C7787",
-  border: "#28324A",
+  goldDark: "#E4C57E",
+  cream: "#0C121D",
+  paper: "#131B2A",
+  ink: "#EAE7DE",
+  slate: "#98A3B4",
+  slateLight: "#707B8D",
+  border: "#242E42",
   success: "#4CAF7D",
   successBg: "#173327",
   danger: "#E0796C",
@@ -220,39 +224,40 @@ function useStorage(key, initial, shared = true) {
 ============================================================ */
 function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
   const isGold = tone === "gold";
-  const bg = isGold ? COLORS.paper : COLORS.navy;
+  const bg = isGold ? COLORS.paper : `linear-gradient(155deg, ${COLORS.navy}, ${COLORS.navyDeep})`;
   const textColor = isGold ? COLORS.ink : "white";
-  const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.7)";
-  const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.6)";
+  const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.62)";
+  const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.55)";
   return (
     <div
       style={{
         background: bg,
-        borderRadius: 14,
+        borderRadius: 16,
         border: isGold ? `1px solid ${COLORS.border}` : "none",
-        boxShadow: isGold ? "0 1px 2px rgba(16,26,46,0.04), 0 8px 20px -12px rgba(16,26,46,0.10)" : "0 4px 14px -6px rgba(16,26,46,0.35)",
+        boxShadow: isGold ? "0 1px 2px rgba(16,26,46,0.05), 0 10px 24px -14px rgba(16,26,46,0.14)" : "0 10px 28px -12px rgba(8,14,24,0.45)",
       }}
-      className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden"
+      className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden transition-transform duration-200 hover:-translate-y-0.5"
     >
+      <div className="absolute top-0 right-0 left-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.goldSoft})`, opacity: isGold ? 0.9 : 0.6 }} />
       {!isGold && (
         <>
-          <div className="absolute -left-6 -top-6 w-24 h-24 rounded-full bg-white/5" />
-          <div className="absolute -left-2 -bottom-8 w-20 h-20 rounded-full bg-white/5" />
+          <div className="absolute -left-8 -top-8 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.04)" }} />
+          <div className="absolute -left-3 -bottom-10 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,0.03)" }} />
         </>
       )}
-      <div className="relative flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold tracking-wide" style={{ color: labelColor }}>{label}</span>
+      <div className="relative flex items-center justify-between mb-3.5">
+        <span className="text-[11px] font-bold tracking-wide" style={{ color: labelColor, letterSpacing: "0.01em" }}>{label}</span>
         {Icon && (
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: isGold ? COLORS.goldSoft + "33" : "rgba(255,255,255,0.12)" }}
+            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: isGold ? `${COLORS.goldSoft}30` : "rgba(255,255,255,0.10)", border: isGold ? `1px solid ${COLORS.goldSoft}55` : "1px solid rgba(255,255,255,0.08)" }}
           >
-            <Icon size={16} style={{ color: isGold ? COLORS.gold : "rgba(255,255,255,0.85)" }} />
+            <Icon size={15} style={{ color: isGold ? COLORS.gold : "rgba(255,255,255,0.9)" }} />
           </div>
         )}
       </div>
-      <div className="relative text-2xl font-bold tabular-nums" style={{ color: textColor }}>{value}</div>
-      {sub && <div className="relative text-xs mt-1" style={{ color: subColor }}>{sub}</div>}
+      <div className="relative text-[26px] leading-none font-extrabold tabular-nums" style={{ color: textColor, letterSpacing: "-0.01em" }}>{value}</div>
+      {sub && <div className="relative text-xs mt-2" style={{ color: subColor }}>{sub}</div>}
     </div>
   );
 }
@@ -260,19 +265,19 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
 function SectionCard({ title, action, children, className = "" }) {
   return (
     <div
-      className={`rounded-2xl border ${className}`}
-      style={{ borderColor: COLORS.border, background: COLORS.paper, boxShadow: "0 1px 2px rgba(16,26,46,0.04), 0 8px 20px -12px rgba(16,26,46,0.10)" }}
+      className={`rounded-[18px] border ${className}`}
+      style={{ borderColor: COLORS.border, background: COLORS.paper, boxShadow: "0 1px 2px rgba(16,26,46,0.04), 0 10px 24px -14px rgba(16,26,46,0.12)" }}
     >
       {title && (
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b" style={{ borderColor: COLORS.border }}>
-          <h3 className="font-bold text-sm flex items-center gap-2" style={{ color: COLORS.ink }}>
-            <span className="w-1 h-4 rounded-full" style={{ background: COLORS.gold }} />
+        <div className="flex items-center justify-between px-5 md:px-6 pt-4 pb-3 border-b" style={{ borderColor: COLORS.border }}>
+          <h3 className="font-bold text-[13.5px] flex items-center gap-2.5" style={{ color: COLORS.ink }}>
+            <span className="w-1 h-4 rounded-full" style={{ background: `linear-gradient(180deg, ${COLORS.gold}, ${COLORS.goldDark})` }} />
             {title}
           </h3>
           {action}
         </div>
       )}
-      <div className="p-5">{children}</div>
+      <div className="p-5 md:p-6">{children}</div>
     </div>
   );
 }
@@ -762,11 +767,17 @@ export default function App() {
     <div dir="rtl" className="h-screen flex overflow-hidden" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@700;800;900&family=Cairo:wght@400;500;600;700&display=swap');
-        * { font-family: 'Cairo', sans-serif; }
+        * { font-family: 'Cairo', sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
         .display-font { font-family: 'Tajawal', sans-serif; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-thumb { background: #D8D2C0; border-radius: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: ${COLORS.slateLight}55; border-radius: 8px; }
+        ::-webkit-scrollbar-thumb:hover { background: ${COLORS.slateLight}88; }
         table { border-collapse: collapse; }
+        button { transition: background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease, opacity .15s ease; }
+        button:active { transform: scale(0.98); }
+        input, select, textarea { transition: border-color .15s ease, box-shadow .15s ease; }
+        input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 3px ${COLORS.gold}2A; border-color: ${COLORS.gold} !important; }
         @page { size: A4 portrait; margin: 10mm 8mm; }
         .print-only-area { position: absolute; left: -99999px; top: -99999px; }
         .profit-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -784,9 +795,11 @@ export default function App() {
           #print-area table.profit-table { font-size: 7px; }
           #print-area table.profit-table th, #print-area table.profit-table td { padding: 2px 3px !important; word-break: normal; overflow-wrap: break-word; line-height: 1.25; }
           #print-area table.profit-table th:first-child,
-          #print-area table.profit-table td:first-child { width: 15% !important; min-width: 15% !important; }
-          .profit-summary-grid { flex-wrap: nowrap !important; }
-          .profit-summary-box { flex: 1 1 0 !important; min-width: 0 !important; padding: 4px !important; }
+          #print-area table.profit-table td:first-child { width: 19% !important; min-width: 19% !important; white-space: normal !important; overflow: visible !important; }
+          #print-area table.profit-table td:first-child .code-cell-inner { display: flex !important; flex-direction: column !important; align-items: center !important; gap: 2px !important; }
+          #print-area table.profit-table td:first-child .code-badge { min-width: 0 !important; }
+          .profit-summary-grid { flex-wrap: wrap !important; }
+          .profit-summary-box { flex: 1 1 23% !important; min-width: 0 !important; padding: 4px !important; }
           .profit-summary-box .profit-summary-label { font-size: 7px !important; }
           .profit-summary-box .profit-summary-value { font-size: 9px !important; }
           .no-print { display: none !important; }
@@ -802,16 +815,16 @@ export default function App() {
       {showSidebar && !isEmbedded && (
       <aside
         className={isDesktop ? "w-64 shrink-0 flex flex-col text-white" : "w-64 shrink-0 flex flex-col text-white fixed inset-y-0 right-0 z-30"}
-        style={{ background: COLORS.navy }}
+        style={{ background: `linear-gradient(185deg, ${COLORS.navy}, ${COLORS.navyDeep})` }}
       >
         <div className="px-5 py-6 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0 bg-white p-1">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-white p-1.5 shadow-lg">
               <img src={LOGO_DATA_URI} alt="El Rabeh" className="w-full h-full object-contain" />
             </div>
             <div className="min-w-0">
               <div className="font-extrabold text-sm leading-tight display-font truncate">قسم الصيانة والتشغيل</div>
-              <div className="text-[11px] text-white/50">El Rabeh for General Contracting</div>
+              <div className="text-[10.5px] tracking-wide text-white/45 mt-0.5">EL RABEH FOR GENERAL CONTRACTING</div>
             </div>
           </div>
           {!isDesktop && (
@@ -823,26 +836,29 @@ export default function App() {
         <div className="px-3 pt-3">
           <button
             onClick={() => saveTheme(theme === "dark" ? "light" : "dark")}
-            className="w-full flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition"
-            style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.85)" }}
+            className="w-full flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition hover:bg-white/[0.12]"
+            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.85)", border: "1px solid rgba(255,255,255,0.06)" }}
           >
             {theme === "dark" ? <><Sun size={14} /> الوضع الفاتح</> : <><Moon size={14} /> الوضع الداكن</>}
           </button>
         </div>
-        <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
           {NAV.map((n) => {
             const active = view === n.key;
             return (
               <button
                 key={n.key}
                 onClick={() => { setView(n.key); setSidebarOpen(false); }}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-semibold transition text-right"
+                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-all text-right"
                 style={{
-                  background: active ? COLORS.gold : "transparent",
-                  color: active ? COLORS.navy : "rgba(255,255,255,0.75)",
+                  background: active ? `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.goldDark})` : "transparent",
+                  color: active ? COLORS.navyDeep : "rgba(255,255,255,0.68)",
+                  boxShadow: active ? "0 6px 16px -6px rgba(176,141,66,0.5)" : "none",
                 }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
               >
-                <n.icon size={17} />
+                <n.icon size={16} />
                 {n.label}
               </button>
             );
@@ -851,20 +867,20 @@ export default function App() {
         <div className="px-3 pb-3 space-y-2">
           <button
             onClick={() => exportToExcel({ expenses, custodies, revenues })}
-            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition"
-            style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.85)" }}
+            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition hover:bg-white/[0.12]"
+            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.85)", border: "1px solid rgba(255,255,255,0.06)" }}
           >
             <FileSpreadsheet size={15} /> تصدير كل البيانات لإكسل
           </button>
           <button
             onClick={() => signOut(auth)}
-            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition"
-            style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.85)" }}
+            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-bold transition hover:bg-white/[0.12]"
+            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.85)", border: "1px solid rgba(255,255,255,0.06)" }}
           >
             تسجيل خروج
           </button>
         </div>
-        <div className="px-5 py-4 border-t border-white/10 text-[11px] text-white/40">
+        <div className="px-5 py-4 border-t border-white/10 text-[10.5px] text-white/35">
           البيانات محفوظة ومشتركة بين كل المستخدمين
         </div>
       </aside>
@@ -872,16 +888,16 @@ export default function App() {
 
       {/* المحتوى */}
       <main className="flex-1 min-w-0 overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center justify-between px-4 md:px-8 py-3 border-b" style={{ background: "rgba(247,244,237,0.9)", backdropFilter: "blur(6px)", borderColor: COLORS.border }}>
+        <div className="sticky top-0 z-10 flex items-center justify-between px-4 md:px-8 py-3 border-b" style={{ background: `${COLORS.cream}E6`, backdropFilter: "blur(8px)", borderColor: COLORS.border }}>
           <div className="flex items-center gap-2">
             {!isDesktop && !isEmbedded && (
               <>
-                <button onClick={() => setSidebarOpen(true)} className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: COLORS.navy }}>
+                <button onClick={() => setSidebarOpen(true)} className="px-3 py-2 rounded-xl flex items-center gap-2" style={{ background: COLORS.navy }}>
                   <Menu size={18} className="text-white" />
                   <span className="text-xs font-bold text-white">القائمة</span>
                 </button>
-                <button onClick={() => setView("home")} className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: COLORS.gold }}>
-                  <Building2 size={18} style={{ color: COLORS.navy }} />
+                <button onClick={() => setView("home")} className="px-3 py-2 rounded-xl flex items-center gap-2" style={{ background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.goldDark})` }}>
+                  <Building2 size={18} style={{ color: COLORS.navyDeep }} />
                 </button>
               </>
             )}
@@ -891,11 +907,11 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             {lastAction && (
-              <button onClick={handleUndo} className="px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold" style={{ background: COLORS.cream, color: COLORS.ink, border: `1px solid ${COLORS.border}` }}>
+              <button onClick={handleUndo} className="px-3 py-2 rounded-xl flex items-center gap-1.5 text-xs font-bold" style={{ background: COLORS.paper, color: COLORS.ink, border: `1px solid ${COLORS.border}` }}>
                 <ArrowLeft size={14} /> تراجع عن آخر تعديل
               </button>
             )}
-            <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: COLORS.gold }}>
+            <div className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full" style={{ color: COLORS.gold, background: `${COLORS.goldSoft}22`, border: `1px solid ${COLORS.goldSoft}44` }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.success }} />
               <span className="hidden sm:inline">متصل ومحفوظ تلقائيًا</span>
             </div>
@@ -922,7 +938,7 @@ export default function App() {
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
-            {view === "salaries" && <SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} />}
+            {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
@@ -1148,10 +1164,13 @@ function Dashboard({ expenses, custodies, custodyTotals }) {
 
 function Header({ title, sub, action }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between flex-wrap gap-3">
       <div>
-        <h1 className="text-2xl font-extrabold display-font" style={{ color: COLORS.ink }}>{title}</h1>
-        {sub && <p className="text-sm mt-1" style={{ color: COLORS.slate }}>{sub}</p>}
+        <div className="flex items-center gap-2.5">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: COLORS.gold }} />
+          <h1 className="text-[22px] md:text-[26px] font-extrabold display-font" style={{ color: COLORS.ink, letterSpacing: "-0.01em" }}>{title}</h1>
+        </div>
+        {sub && <p className="text-[13px] mt-1.5 leading-relaxed" style={{ color: COLORS.slate }}>{sub}</p>}
       </div>
       {action}
     </div>
@@ -2791,6 +2810,134 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
 /* ============================================================
    المرتبات
 ============================================================ */
+function SalariesGate({ children }) {
+  const [checking, setChecking] = useState(true);
+  const [storedPassword, setStoredPassword] = useState(null); // null = لسه بيتحمّل، "" = مفيش كلمة سر متسجّلة
+  const [unlocked, setUnlocked] = useState(false);
+  const [input, setInput] = useState("");
+  const [error, setError] = useState("");
+  const [newPass1, setNewPass1] = useState("");
+  const [newPass2, setNewPass2] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [changingPass, setChangingPass] = useState(false);
+  const boxStyle = { background: COLORS.paper, borderColor: COLORS.border, boxShadow: "0 8px 30px -10px rgba(16,26,46,0.15)" };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "maintenance-system", "salariesPassword"));
+        if (cancelled) return;
+        setStoredPassword(snap.exists() ? snap.data().value || "" : "");
+      } catch (e) {
+        if (!cancelled) setStoredPassword("");
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const submitUnlock = (e) => {
+    e.preventDefault();
+    if (input === storedPassword) { setUnlocked(true); setError(""); }
+    else setError("كلمة السر غير صحيحة");
+  };
+
+  const submitSetup = async (e) => {
+    e.preventDefault();
+    if (newPass1.length < 4) { setError("كلمة السر لازم تكون 4 حروف/أرقام على الأقل"); return; }
+    if (newPass1 !== newPass2) { setError("كلمتا السر مش متطابقتين"); return; }
+    setSaving(true);
+    try {
+      await setDoc(doc(db, "maintenance-system", "salariesPassword"), { value: newPass1 });
+      setStoredPassword(newPass1);
+      setUnlocked(true);
+      setChangingPass(false);
+      setNewPass1("");
+      setNewPass2("");
+      setError("");
+    } catch (e) {
+      setError("حصل خطأ أثناء الحفظ، حاول تاني");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (checking) {
+    return (
+      <div className="h-64 flex items-center justify-center">
+        <div className="text-sm font-semibold" style={{ color: COLORS.slate }}>جاري التحقق...</div>
+      </div>
+    );
+  }
+
+  if (unlocked) {
+    return (
+      <div>
+        <div className="no-print flex justify-end mb-2">
+          <button onClick={() => setChangingPass((v) => !v)} className="text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg" style={{ color: COLORS.slate, background: COLORS.cream }}>
+            <ShieldCheck size={13} /> {changingPass ? "إلغاء" : "تغيير كلمة السر"}
+          </button>
+        </div>
+        {changingPass && (
+          <form onSubmit={submitSetup} className="no-print mb-4 p-4 rounded-xl border max-w-sm mr-auto" style={boxStyle}>
+            <div className="text-xs mb-3 font-bold" style={{ color: COLORS.ink }}>تحديد كلمة سر جديدة</div>
+            <div className="space-y-3">
+              <TextInput type="password" placeholder="كلمة السر الجديدة" value={newPass1} onChange={(e) => setNewPass1(e.target.value)} dir="ltr" />
+              <TextInput type="password" placeholder="تأكيد كلمة السر" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} dir="ltr" />
+              {error && <div className="text-xs font-semibold" style={{ color: COLORS.danger }}>{error}</div>}
+              <button type="submit" disabled={saving} className="w-full py-2 rounded-lg text-xs font-bold text-white" style={{ background: COLORS.navy, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "جاري الحفظ..." : "حفظ كلمة السر الجديدة"}
+              </button>
+            </div>
+          </form>
+        )}
+        {children}
+      </div>
+    );
+  }
+
+  if (storedPassword === "") {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <form onSubmit={submitSetup} className="w-full max-w-sm p-6 rounded-2xl border" style={boxStyle}>
+          <div className="flex items-center gap-2 mb-4">
+            <ShieldCheck size={20} style={{ color: COLORS.gold }} />
+            <div className="font-extrabold" style={{ color: COLORS.ink }}>تأمين تاب المرتبات</div>
+          </div>
+          <div className="text-xs mb-4" style={{ color: COLORS.slate }}>أول مرة تفتح التاب ده — حدد كلمة سر هتُطلب في كل مرة حد يحاول يفتحه.</div>
+          <div className="space-y-3">
+            <Field label="كلمة السر الجديدة"><TextInput type="password" value={newPass1} onChange={(e) => setNewPass1(e.target.value)} dir="ltr" /></Field>
+            <Field label="تأكيد كلمة السر"><TextInput type="password" value={newPass2} onChange={(e) => setNewPass2(e.target.value)} dir="ltr" /></Field>
+            {error && <div className="text-xs font-semibold" style={{ color: COLORS.danger }}>{error}</div>}
+            <button type="submit" disabled={saving} className="w-full py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.navy, opacity: saving ? 0.6 : 1 }}>
+              {saving ? "جاري الحفظ..." : "حفظ وفتح"}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center py-16">
+      <form onSubmit={submitUnlock} className="w-full max-w-sm p-6 rounded-2xl border" style={boxStyle}>
+        <div className="flex items-center gap-2 mb-4">
+          <ShieldCheck size={20} style={{ color: COLORS.gold }} />
+          <div className="font-extrabold" style={{ color: COLORS.ink }}>تاب المرتبات محمي</div>
+        </div>
+        <div className="text-xs mb-4" style={{ color: COLORS.slate }}>اكتب كلمة السر للمتابعة</div>
+        <div className="space-y-3">
+          <TextInput type="password" value={input} onChange={(e) => setInput(e.target.value)} dir="ltr" autoFocus />
+          {error && <div className="text-xs font-semibold" style={{ color: COLORS.danger }}>{error}</div>}
+          <button type="submit" className="w-full py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.navy }}>دخول</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -3283,11 +3430,11 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
                   {g.list.map((r) => (
                     <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
                       <td className="px-3 py-2.5 font-semibold whitespace-nowrap" style={{ minWidth: 280 }}>
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center justify-between gap-2 code-cell-inner">
                           <span style={{ display: "inline-block" }}>{r.code}</span>
                           {r.type ? (
                             <span
-                              className="inline-flex items-center justify-center px-2 py-1 rounded text-[9px] font-bold text-white whitespace-nowrap flex-shrink-0"
+                              className="inline-flex items-center justify-center px-2 py-1 rounded text-[9px] font-bold text-white whitespace-nowrap flex-shrink-0 code-badge"
                               style={{ background: typeBadgeColor(r.type), minWidth: 70 }}
                             >
                               {r.type}
