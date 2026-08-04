@@ -4706,9 +4706,9 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               ["إجمالي المصروفات", totals.spent],
               ["الرصيد المرحّل", totals.remaining],
             ].map(([label, val]) => (
-              <div key={label} className="text-center p-2 rounded-lg" style={{ background: "#F6F4EE" }}>
-                <div className="text-[9px] font-bold mb-1" style={{ color: "#5B6579" }}>{label}</div>
-                <div className="font-extrabold tabular-nums" style={{ color: Number(val) < 0 ? "#AC4238" : "#101A2E" }}>{fmtMoney(val)}</div>
+              <div key={label} className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
+                <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>{label}</div>
+                <div className="font-extrabold tabular-nums" style={{ color: Number(val) < 0 ? "#E0796C" : "#FFFFFF" }}>{fmtMoney(val)}</div>
               </div>
             ))}
           </div>
