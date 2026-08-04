@@ -107,7 +107,7 @@ function LoginScreen() {
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
     } catch (err) {
-      setError("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+      setError(`فشل الدخول — كود الخطأ: ${err && err.code ? err.code : "غير معروف"} (${err && err.message ? err.message : ""})`);
     } finally {
       setBusy(false);
     }
