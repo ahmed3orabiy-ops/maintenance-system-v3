@@ -1,18 +1,14 @@
-// إعدادات الاتصال بـ Firebase
-// هتلاقي القيم دي من صفحة إعدادات مشروعك على console.firebase.google.com
-// (Project settings → عمومًا هتلاقيها تحت قسم "Your apps" بعد ما تضيف تطبيق ويب)
-
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "ضع_قيمتك_هنا",
-  authDomain: "ضع_قيمتك_هنا",
-  projectId: "ضع_قيمتك_هنا",
-  storageBucket: "ضع_قيمتك_هنا",
-  messagingSenderId: "ضع_قيمتك_هنا",
-  appId: "ضع_قيمتك_هنا",
+  apiKey: "AIzaSyCE5GZAJOaHdSIFC9udxENcHe_EMjjYqV0",
+  authDomain: "el-rabeh.firebaseapp.com",
+  projectId: "el-rabeh",
+  storageBucket: "el-rabeh.firebasestorage.app",
+  messagingSenderId: "1073491754502",
+  appId: "1:1073491754502:web:2951c9f74a01a68acfcd87",
 };
 
 const app = initializeApp(firebaseConfig);
