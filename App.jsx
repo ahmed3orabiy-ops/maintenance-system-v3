@@ -440,6 +440,8 @@ export default function App() {
 
   const [expenses, saveExpenses, expensesLoaded] = useStorage("expenses", []);
   const [custodies, saveCustodies, custodiesLoaded] = useStorage("custodies", []);
+  const [subCustodies, saveSubCustodies, subCustodiesLoaded] = useStorage("subCustodies", []);
+  const [subCustodyClearances, saveSubCustodyClearances, subClearancesLoaded] = useStorage("subCustodyClearances", []);
   const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
@@ -688,6 +690,50 @@ export default function App() {
     return map;
   }, [custodies, expenses]);
 
+  const addSubCustody = (c) => {
+    pushUndo("subCustodies", subCustodies);
+    saveSubCustodies([...subCustodies, { ...c, id: uid() }]);
+    showToast("تم تسجيل العهدة الفرعية");
+  };
+  const updateSubCustody = (id, updates) => {
+    pushUndo("subCustodies", subCustodies);
+    saveSubCustodies(subCustodies.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    showToast("تم تعديل العهدة الفرعية");
+  };
+  const deleteSubCustody = (id) => {
+    if (subCustodyClearances.some((c) => c.subCustodyId === id)) {
+      showToast("لا يمكن حذف عهدة فرعية ليها بنود تصفية مسجّلة", "danger");
+      return;
+    }
+    pushUndo("subCustodies", subCustodies);
+    saveSubCustodies(subCustodies.filter((c) => c.id !== id));
+    showToast("تم حذف العهدة الفرعية", "danger");
+  };
+  const addSubCustodyClearance = (c) => {
+    pushUndo("subCustodyClearances", subCustodyClearances);
+    saveSubCustodyClearances([...subCustodyClearances, { ...c, id: uid() }]);
+    showToast("تم تسجيل بند التصفية");
+  };
+  const updateSubCustodyClearance = (id, updates) => {
+    pushUndo("subCustodyClearances", subCustodyClearances);
+    saveSubCustodyClearances(subCustodyClearances.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    showToast("تم تعديل بند التصفية");
+  };
+  const deleteSubCustodyClearance = (id) => {
+    pushUndo("subCustodyClearances", subCustodyClearances);
+    saveSubCustodyClearances(subCustodyClearances.filter((c) => c.id !== id));
+    showToast("تم حذف بند التصفية", "danger");
+  };
+  const subCustodyTotals = useMemo(() => {
+    const map = {};
+    for (const c of subCustodies) {
+      const cleared = subCustodyClearances.filter((x) => x.subCustodyId === c.id).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      const given = Number(c.amountGiven) || 0;
+      map[c.id] = { given, cleared, remaining: given - cleared };
+    }
+    return map;
+  }, [subCustodies, subCustodyClearances]);
+
   const bulkImport = ({ newCustodies, newExpenses, mode }) => {
     pushUndoMulti([
       { storeKey: "custodies", prevValue: custodies },
@@ -703,7 +749,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded;
 
   const NAV = [
     { key: "home", label: "الصفحة الرئيسية", icon: Building2 },
@@ -713,6 +759,7 @@ export default function App() {
     { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
     { key: "revenue", label: "الإيرادات", icon: Wallet },
     { key: "custodies", label: "العهد", icon: ClipboardList },
+    { key: "subCustodies", label: "عهد فرعية (مشرفين)", icon: Wallet },
     { key: "database", label: "قاعدة البيانات", icon: Database },
     { key: "equipment", label: "بطاقة أداء المعدات", icon: Wrench },
     { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
@@ -768,7 +815,7 @@ export default function App() {
   }
 
   return (
-    <div dir="rtl" className="h-screen flex overflow-hidden" style={{ background: COLORS.cream, fontFamily: "'Cairo', sans-serif" }}>
+    <div dir="rtl" className="h-screen flex overflow-hidden" style={{ background: COLORS.cream, color: COLORS.ink, fontFamily: "'Cairo', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@700;800;900&family=Cairo:wght@400;500;600;700&display=swap');
         * { font-family: 'Cairo', sans-serif; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
@@ -934,6 +981,7 @@ export default function App() {
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onDelete={deleteRevenue} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
+            {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
             {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
             {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
@@ -1535,7 +1583,219 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
 /* ============================================================
    قاعدة البيانات
 ============================================================ */
-function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate }) {
+/* ============================================================
+   عهد فرعية (مشرفين الصيانة) — عهدة نقدية شخصية بتتصفّى تدريجيًا
+============================================================ */
+function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdateSub, onDeleteSub, onAddClearance, onUpdateClearance, onDeleteClearance }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [q, setQ] = useState("");
+  const emptySub = { supervisorName: "", date: todayISO(), amountGiven: "", notes: "" };
+  const [form, setForm] = useState(emptySub);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const emptyClearance = { date: todayISO(), amount: "", description: "" };
+  const [clearanceForm, setClearanceForm] = useState(emptyClearance);
+  const [editingClearanceId, setEditingClearanceId] = useState(null);
+  const csetC = (k) => (e) => setClearanceForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const startAdd = () => { setEditingId(null); setForm(emptySub); setShowForm(true); };
+  const startEdit = (c) => {
+    setEditingId(c.id);
+    setForm({ supervisorName: c.supervisorName || "", date: c.date || todayISO(), amountGiven: c.amountGiven ?? "", notes: c.notes || "" });
+    setShowForm(true);
+  };
+  const cancelForm = () => { setShowForm(false); setEditingId(null); setForm(emptySub); };
+
+  const submitSub = (e) => {
+    e.preventDefault();
+    if (editingId) onUpdateSub(editingId, form);
+    else onAddSub(form);
+    cancelForm();
+  };
+
+  const startClearanceEdit = (c) => {
+    setEditingClearanceId(c.id);
+    setClearanceForm({ date: c.date || todayISO(), amount: c.amount ?? "", description: c.description || "" });
+  };
+  const cancelClearanceForm = () => { setEditingClearanceId(null); setClearanceForm(emptyClearance); };
+
+  const submitClearance = (e, subId) => {
+    e.preventDefault();
+    if (editingClearanceId) onUpdateClearance(editingClearanceId, clearanceForm);
+    else onAddClearance({ ...clearanceForm, subCustodyId: subId });
+    cancelClearanceForm();
+  };
+
+  const term = q.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      [...subCustodies]
+        .filter((c) => !term || [c.supervisorName, c.notes].join(" ").toLowerCase().includes(term))
+        .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [subCustodies, term]
+  );
+
+  const grand = filtered.reduce((acc, c) => {
+    const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
+    return { given: acc.given + t.given, cleared: acc.cleared + t.cleared, remaining: acc.remaining + t.remaining };
+  }, { given: 0, cleared: 0, remaining: 0 });
+
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="عهد فرعية — مشرفين الصيانة"
+        sub="عهدة نقدية شخصية لكل مشرف، بتتسجّل عليها بنود التصفية أول بأول عشان تعرف باقيله كام"
+        action={
+          <div className="no-print flex flex-wrap gap-2 items-center">
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+              <Printer size={16} /> طباعة
+            </button>
+            <button onClick={() => (showForm ? cancelForm() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "عهدة فرعية جديدة"}
+            </button>
+          </div>
+        }
+      />
+
+      <div id="print-area">
+        <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <KPICard label="إجمالي الممنوح" value={fmtMoney(grand.given)} icon={Wallet} />
+          <KPICard label="إجمالي المُصفّى" value={fmtMoney(grand.cleared)} tone="gold" icon={Wallet} />
+          <KPICard label="إجمالي المتبقي" value={fmtMoney(grand.remaining)} tone="gold" icon={Wallet} />
+        </div>
+
+        {showForm && (
+          <form onSubmit={submitSub} className="no-print mt-6">
+            <SectionCard title={editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Field label="اسم المشرف" required><TextInput value={form.supervisorName} onChange={set("supervisorName")} required placeholder="اسم مشرف الصيانة" /></Field>
+                <Field label="تاريخ المنح" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
+                <Field label="المبلغ الممنوح" required><TextInput type="number" step="0.01" value={form.amountGiven} onChange={set("amountGiven")} required placeholder="0" /></Field>
+                <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
+              </div>
+              <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+              </div>
+            </SectionCard>
+          </form>
+        )}
+
+        {subCustodies.length === 0 ? (
+          <SectionCard className="mt-6"><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة بعد" /></SectionCard>
+        ) : (
+          <>
+            <div className="no-print mt-6 relative">
+              <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم المشرف أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+            </div>
+
+            <div className="space-y-4 mt-4">
+              {filtered.map((c) => {
+                const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
+                const isExpanded = expandedId === c.id;
+                const items = clearances.filter((x) => x.subCustodyId === c.id).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+                return (
+                  <SectionCard key={c.id}>
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <div className="font-extrabold text-sm" style={{ color: COLORS.ink }}>{c.supervisorName}</div>
+                        <div className="text-xs mt-1" style={{ color: COLORS.slate }}>
+                          تاريخ المنح: {c.date} {c.notes && <span> — {c.notes}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>الممنوح</div>
+                          <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(t.given)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>المُصفّى</div>
+                          <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(t.cleared)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold" style={{ color: COLORS.slate }}>المتبقي</div>
+                          <div className="text-sm font-extrabold tabular-nums" style={{ color: t.remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(t.remaining)}</div>
+                        </div>
+                        <div className="no-print flex items-center gap-1">
+                          <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                            {isExpanded ? "إخفاء التصفية" : `التصفية (${items.length})`}
+                          </button>
+                          <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                          <button onClick={() => onDeleteSub(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {(isExpanded || items.length > 0) && (
+                      <div className="mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                        {isExpanded && (
+                          <form onSubmit={(e) => submitClearance(e, c.id)} className="no-print mb-4 p-4 rounded-xl" style={{ background: COLORS.cream }}>
+                            <div className="text-xs font-bold mb-3" style={{ color: COLORS.ink }}>{editingClearanceId ? "تعديل بند تصفية" : "تسجيل بند تصفية جديد"}</div>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                              <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
+                              <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
+                              <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
+                            </div>
+                            <div className="flex justify-end gap-2 mt-3">
+                              {editingClearanceId && (
+                                <button type="button" onClick={cancelClearanceForm} className="px-4 py-2 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                              )}
+                              <button type="submit" className="px-4 py-2 rounded-lg text-xs font-bold text-white" style={{ background: COLORS.navy }}>{editingClearanceId ? "حفظ التعديل" : "إضافة"}</button>
+                            </div>
+                          </form>
+                        )}
+                        {items.length === 0 ? (
+                          <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لسه مفيش بنود تصفية مسجّلة</div>
+                        ) : (
+                          <div className="overflow-x-auto -mx-2">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                                  {["التاريخ", "فيم صُرف", "المبلغ", ""].map((h) => (
+                                    <th key={h} className="px-3 py-2 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {items.map((x) => (
+                                  <tr key={x.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                                    <td className="px-3 py-2 whitespace-nowrap">{x.date}</td>
+                                    <td className="px-3 py-2">{x.description}</td>
+                                    <td className="px-3 py-2 tabular-nums font-bold">{fmtMoney(x.amount)}</td>
+                                    <td className="px-3 py-2 no-print">
+                                      <div className="flex items-center gap-1">
+                                        <button onClick={() => { setExpandedId(c.id); startClearanceEdit(x); }} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button>
+                                        <button onClick={() => onDeleteClearance(x.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </SectionCard>
+                );
+              })}
+              {filtered.length === 0 && (
+                <SectionCard><div className="text-sm text-center py-6" style={{ color: COLORS.slate }}>لا توجد نتائج مطابقة للبحث</div></SectionCard>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [srcFilter, setSrcFilter] = useState("");
@@ -1543,6 +1803,7 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
   const [dateTo, setDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [editing, setEditing] = useState(null);
+function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate }) {
   const custodyLabel = (id) => custodies.find((c) => c.id === id)?.label || "—";
 
   const codeMap = useMemo(() => {
@@ -3028,15 +3289,15 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
               <div className="grid grid-cols-3 gap-3">
                 <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
                   <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>الإجمالي</div>
-                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.total)}</div>
+                  <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(b.total)}</div>
                 </div>
                 <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
                   <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>مباشر</div>
-                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.direct)}</div>
+                  <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(b.direct)}</div>
                 </div>
                 <div className="p-3 rounded-lg text-center" style={{ background: COLORS.cream }}>
                   <div className="text-[10px] font-bold mb-1" style={{ color: COLORS.slate }}>غير مباشر</div>
-                  <div className="text-sm font-extrabold tabular-nums">{fmtMoney(b.indirect)}</div>
+                  <div className="text-sm font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(b.indirect)}</div>
                 </div>
               </div>
             </SectionCard>
@@ -3390,31 +3651,31 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
             <div className="profit-summary-grid mb-4">
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>كارتات</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.cards)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.cards)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات صيانة</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.maint)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.maint)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات سولار</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.fuel)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.fuel)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات زيوت</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.oil)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.oil)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مرتب مباشر</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.driverSalary)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.driverSalary)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مرتب غير مباشر</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.shareSalary)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.shareSalary)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: COLORS.cream }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>مصروفات أخرى</div>
-                <div className="text-sm font-extrabold tabular-nums profit-summary-value">{fmtMoney(gTotals.shareOther)}</div>
+                <div className="text-sm font-extrabold tabular-nums profit-summary-value" style={{ color: COLORS.ink }}>{fmtMoney(gTotals.shareOther)}</div>
               </div>
               <div className="p-3 rounded-lg text-center profit-summary-box" style={{ background: gTotals.net >= 0 ? COLORS.successBg : COLORS.dangerBg }}>
                 <div className="text-[10px] font-bold mb-1 profit-summary-label" style={{ color: COLORS.slate }}>صافي الربح</div>
@@ -4760,13 +5021,13 @@ function AlertsView({ custodies, custodyTotals, expenses, revenues, salaries, on
             <span className="text-sm font-semibold flex items-center gap-2" style={{ color: missingData.length > 0 ? COLORS.danger : COLORS.success }}>
               <ShieldCheck size={15} /> بنود ناقصة البيانات (بدون تصنيف أو عهدة أو غرض صرف)
             </span>
-            <span className="text-sm font-bold">{fmtNum(missingData.length)}</span>
+            <span className="text-sm font-bold" style={{ color: missingData.length > 0 ? COLORS.danger : COLORS.success }}>{fmtNum(missingData.length)}</span>
           </div>
           <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: duplicates.length > 0 ? COLORS.dangerBg : COLORS.successBg }}>
             <span className="text-sm font-semibold flex items-center gap-2" style={{ color: duplicates.length > 0 ? COLORS.danger : COLORS.success }}>
               <ShieldCheck size={15} /> بنود مكررة على الأرجح (نفس العهدة والكود والقيمة والتاريخ)
             </span>
-            <span className="text-sm font-bold">{fmtNum(duplicates.length)}</span>
+            <span className="text-sm font-bold" style={{ color: duplicates.length > 0 ? COLORS.danger : COLORS.success }}>{fmtNum(duplicates.length)}</span>
           </div>
         </div>
       </SectionCard>
