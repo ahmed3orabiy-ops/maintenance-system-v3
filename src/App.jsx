@@ -4669,7 +4669,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
           action={
             <div className="flex flex-wrap gap-2">
               <ExportButtons onExcel={handleExcelExport} />
-              <button onClick={handlePrint} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
+              <button onClick={handlePrint} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: "#C69A3C", color: "#101A2E" }}>
                 <Printer size={16} /> طباعة / PDF
               </button>
             </div>
@@ -4685,14 +4685,14 @@ function PrintView({ custodies, custodyTotals, expenses }) {
       </div>
 
       {custody && (
-        <div id="print-area" ref={printRef} className="bg-white border rounded-2xl p-6 text-xs" style={{ borderColor: COLORS.border, fontFamily: "'Cairo', sans-serif" }}>
-          <div className="flex items-center justify-between border-b-2 pb-3 mb-3" style={{ borderColor: COLORS.navy }}>
+        <div id="print-area" ref={printRef} className="bg-white border rounded-2xl p-6 text-xs" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
+          <div className="flex items-center justify-between border-b-2 pb-3 mb-3" style={{ borderColor: "#101A2E" }}>
             <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 40, objectFit: "contain" }} />
             <div className="text-center">
-              <div className="font-extrabold text-base display-font" style={{ color: COLORS.gold }}>نموذج تصفية عهدة</div>
+              <div className="font-extrabold text-base display-font" style={{ color: "#C69A3C" }}>نموذج تصفية عهدة</div>
               <div className="font-bold">{custody.source}</div>
             </div>
-            <div className="text-left text-[11px]" style={{ color: COLORS.slate }}>
+            <div className="text-left text-[11px]" style={{ color: "#5B6579" }}>
               <div>من: {custody.periodFrom}</div>
               <div>إلى: {custody.periodTo || "—"}</div>
             </div>
@@ -4706,9 +4706,9 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               ["إجمالي المصروفات", totals.spent],
               ["الرصيد المرحّل", totals.remaining],
             ].map(([label, val]) => (
-              <div key={label} className="text-center p-2 rounded-lg" style={{ background: COLORS.cream }}>
-                <div className="text-[9px] font-bold mb-1" style={{ color: COLORS.slate }}>{label}</div>
-                <div className="font-extrabold tabular-nums" style={{ color: Number(val) < 0 ? COLORS.danger : COLORS.ink }}>{fmtMoney(val)}</div>
+              <div key={label} className="text-center p-2 rounded-lg" style={{ background: "#F6F4EE" }}>
+                <div className="text-[9px] font-bold mb-1" style={{ color: "#5B6579" }}>{label}</div>
+                <div className="font-extrabold tabular-nums" style={{ color: Number(val) < 0 ? "#AC4238" : "#101A2E" }}>{fmtMoney(val)}</div>
               </div>
             ))}
           </div>
@@ -4730,39 +4730,39 @@ function PrintView({ custodies, custodyTotals, expenses }) {
                 <col style={{ width: "9%" }} />
               </colgroup>
               <thead>
-                <tr style={{ background: COLORS.goldSoft }}>
-                  <td colSpan={11} className="border px-3 py-1.5 font-extrabold" style={{ borderColor: COLORS.border, color: COLORS.navy }}>{g.cat}</td>
+                <tr style={{ background: "#E8C978" }}>
+                  <td colSpan={11} className="border px-3 py-1.5 font-extrabold" style={{ borderColor: "#E3DDCE", color: "#101A2E" }}>{g.cat}</td>
                 </tr>
-                <tr style={{ background: COLORS.navy, color: "white" }}>
+                <tr style={{ background: "#101A2E", color: "white" }}>
                   {["م", "التاريخ", "كود المعدة", "النوع", "الماركة", "الموقع", "الغرض من الصرف", "ملاحظات", "نقدي", "تحويل", "شيك"].map((h) => (
-                    <th key={h} className="border px-2.5 py-2.5 font-bold" style={{ borderColor: COLORS.navy }}>{h}</th>
+                    <th key={h} className="border px-2.5 py-2.5 font-bold" style={{ borderColor: "#101A2E" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {g.rows.map((e, i) => (
                   <tr key={e.id}>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: COLORS.border }}>{i + 1}</td>
+                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: COLORS.border }}>{e.date}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: COLORS.border }}>{e.equipmentCode || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: COLORS.border }}>{e.equipmentType || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: COLORS.border }}>{e.brand || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: COLORS.border }}>{e.location || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
                     )}
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: COLORS.border }}>{e.purpose}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: COLORS.border }}>{e.notes || ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: COLORS.border }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: COLORS.border }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: COLORS.border }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -4777,11 +4777,11 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} />
             </colgroup>
             <tbody>
-              <tr style={{ background: COLORS.navy, color: "white" }}>
-                <td colSpan={8} className="border px-3 py-2 font-extrabold text-center" style={{ borderColor: COLORS.navy }}>الإجمالي</td>
-                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: COLORS.navy }}>{fmtNum(sumBy("cash"))}</td>
-                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: COLORS.navy }}>{fmtNum(sumBy("transfer"))}</td>
-                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: COLORS.navy }}>{fmtNum(sumBy("check"))}</td>
+              <tr style={{ background: "#101A2E", color: "white" }}>
+                <td colSpan={8} className="border px-3 py-2 font-extrabold text-center" style={{ borderColor: "#101A2E" }}>الإجمالي</td>
+                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: "#101A2E" }}>{fmtNum(sumBy("cash"))}</td>
+                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: "#101A2E" }}>{fmtNum(sumBy("transfer"))}</td>
+                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: "#101A2E" }}>{fmtNum(sumBy("check"))}</td>
               </tr>
             </tbody>
           </table>
@@ -4791,8 +4791,8 @@ function PrintView({ custodies, custodyTotals, expenses }) {
           <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
             {SIGNATURES.map((s) => (
               <div key={s} className="text-center">
-                <div className="border-b pb-8 mb-1" style={{ borderColor: COLORS.ink }} />
-                <div className="font-bold text-[10px]" style={{ color: COLORS.slate }}>التوقيع / {s}</div>
+                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>التوقيع / {s}</div>
               </div>
             ))}
           </div>
