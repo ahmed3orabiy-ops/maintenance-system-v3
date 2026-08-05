@@ -4876,6 +4876,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
             source: s,
             total: ownerList.filter((r) => (r.source || r.owner) === s).reduce((sum, r) => sum + (Number(r.amount ?? r.total) || 0), 0),
           }));
+          const ownerAllTotal = ownerList.reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
           return (
             <SectionCard
               key={owner}
@@ -4886,6 +4887,13 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                 </button>
               }
             >
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                <KPICard label={`إجمالي إيراد معدات ${owner}`} value={fmtMoney(ownerAllTotal)} icon={TrendingUp} />
+                {bySource.map((b) => (
+                  <KPICard key={b.source} label={`من ${b.source}`} value={fmtMoney(b.total)} tone="gold" icon={Wallet} />
+                ))}
+              </div>
+
               <div className="no-print flex flex-wrap items-center gap-2 mb-4">
                 <span className="text-xs font-bold" style={{ color: COLORS.slate }}>فلتر حسب مصدر الإيراد:</span>
                 <button
@@ -4893,7 +4901,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                   className="px-3 py-1.5 rounded-lg text-xs font-bold"
                   style={{ background: activeSourceFilter === "الكل" ? COLORS.navy : COLORS.cream, color: activeSourceFilter === "الكل" ? "white" : COLORS.slate }}
                 >
-                  الكل — {fmtMoney(ownerList.reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0))}
+                  الكل — {fmtMoney(ownerAllTotal)}
                 </button>
                 {bySource.map((b) => (
                   <button
@@ -4915,7 +4923,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                     <thead>
                       <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                         {["الشهر", "كود المعدة", "النوع", "موقع العمل", "مصدر الإيراد", "المبلغ", "البيان", "ملاحظات", ""].map((h) => (
-                          <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                          <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)", minWidth: h === "مصدر الإيراد" ? 130 : undefined }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -4926,8 +4934,8 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                           <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{r.equipmentCode}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">{r.equipmentType || "—"}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">{r.location || "—"}</td>
-                          <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>{r.source || r.owner}</span>
+                          <td className="px-4 py-2.5 whitespace-nowrap" style={{ minWidth: 130 }}>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap" style={{ background: COLORS.cream, color: COLORS.slate }}>{r.source || r.owner}</span>
                           </td>
                           <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(r.amount ?? r.total)}</td>
                           <td className="px-4 py-2.5">{r.description || "—"}</td>
