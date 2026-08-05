@@ -942,17 +942,6 @@ export default function App() {
         .profit-summary-box { flex: 1 1 22%; min-width: 130px; }
         @media print {
           body, html { background: #FFFFFF !important; }
-          #print-area, #print-area *, .totals-signatures-block, .totals-signatures-block * {
-            background: #FFFFFF !important;
-            color: #101A2E !important;
-            box-shadow: none !important;
-          }
-          #print-area table thead tr, #print-area table tr[style*="background"] {
-            background: #101A2E !important;
-          }
-          #print-area table thead th, #print-area table thead td {
-            color: #FFFFFF !important;
-          }
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
@@ -4748,6 +4737,13 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
     return map;
   }, [equipmentCodes, expenses]);
 
+  const knownLocations = useMemo(() => {
+    const set = new Set();
+    equipmentCodes.forEach((c) => { if (c.location) set.add(cleanText(c.location)); });
+    expenses.forEach((e) => { if (e.location) set.add(cleanText(e.location)); });
+    return [...set].sort();
+  }, [equipmentCodes, expenses]);
+
   const handleCodeChange = (e) => {
     const code = e.target.value;
     const known = knownCodes[normCode(code)];
@@ -4843,7 +4839,13 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                 <TextInput type="month" value={form.month} onChange={set("month")} required />
               </Field>
               <Field label="النوع"><TextInput value={form.equipmentType} onChange={set("equipmentType")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
-              <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مستورد تلقائيًا من كود المعدة" /></Field>
+              <Field label="موقع العمل">
+                <Select value={form.location} onChange={set("location")}>
+                  <option value="">اختر الموقع...</option>
+                  {knownLocations.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {form.location && !knownLocations.includes(form.location) && <option value={form.location}>{form.location}</option>}
+                </Select>
+              </Field>
               <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
               <Field label="البيان"><TextInput value={form.description} onChange={set("description")} placeholder="مثال: إيجار شهري" /></Field>
               <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
