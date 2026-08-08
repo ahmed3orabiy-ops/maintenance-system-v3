@@ -679,6 +679,14 @@ export default function App() {
     showToast(`تم استيراد ${newCodes.length} كود معدة`);
   };
 
+  const bulkImportEmployees = (newEmployees, mode) => {
+    pushUndo("employees", employees);
+    if (mode === "replace") saveEmployees(newEmployees);
+    else saveEmployees([...employees, ...newEmployees]);
+    logAudit("استيراد", "موظف", `استيراد ${newEmployees.length} موظف (${mode === "replace" ? "استبدال" : "إضافة"})`);
+    showToast(`تم استيراد ${newEmployees.length} موظف`);
+  };
+
   const mergeCodeSpellings = (oldSpellings, canonical) => {
     pushUndoMulti([
       { storeKey: "expenses", prevValue: expenses },
@@ -1128,7 +1136,7 @@ export default function App() {
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
-            {view === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} />}
+            {view === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} onImport={bulkImportEmployees} />}
             {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
         )}
@@ -4268,9 +4276,13 @@ function toISODate(val) {
 /* ============================================================
    الموظفين
 ============================================================ */
-function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete }) {
+function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, onImport }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importMode, setImportMode] = useState("append");
+  const fileRef = useRef(null);
   const [q, setQ] = useState("");
   const [printOwner, setPrintOwner] = useState("الكل");
   const empty = { name: "", jobTitle: "", location: "", owner: SOURCES[0], costCode: "", notes: "" };
@@ -4284,11 +4296,20 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
     return map;
   }, [equipmentCodes]);
 
-  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
+  // ترتيب الوظائف: محاسب، مشرف صيانة، سائق سيارة، سائق حفار، سائق لودر، تباع، غفير — وبعدهم أي وظيفة تانية،
+  // وداخل نفس الوظيفة بيفضل ترتيب الإضافة زي ما هو
+  const JOB_ORDER = ["محاسب", "مشرف صيانة", "سائق سيارة", "سائق حفار", "سائق لودر", "تباع", "غفير"];
+  const jobPriority = (title) => {
+    const idx = JOB_ORDER.indexOf((title || "").trim());
+    return idx === -1 ? JOB_ORDER.length : idx;
+  };
+
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); setShowImport(false); };
   const startEdit = (emp) => {
     setEditingId(emp.id);
     setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", owner: emp.owner || SOURCES[0], costCode: emp.costCode || "", notes: emp.notes || "" });
     setShowForm(true);
+    setShowImport(false);
   };
   const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
 
@@ -4302,6 +4323,67 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
   const term = q.trim().toLowerCase();
   const matches = (e) => !term || [e.name, e.jobTitle, e.location, e.costCode, e.notes].join(" ").toLowerCase().includes(term);
 
+  const handleFile = async (file) => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { cellDates: true });
+      const sheetName = wb.SheetNames.includes("الموظفين") ? "الموظفين" : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      const headerRow = (allRows[0] || []).map((h) => String(h || "").trim());
+      const colIndex = (names) => {
+        for (const name of names) {
+          const idx = headerRow.indexOf(name);
+          if (idx !== -1) return idx;
+        }
+        for (const name of names) {
+          const idx = headerRow.findIndex((h) => h && (h.includes(name) || name.includes(h)));
+          if (idx !== -1) return idx;
+        }
+        return -1;
+      };
+      const idxName = colIndex(["الاسم"]);
+      const idxJob = colIndex(["الوظيفة"]);
+      const idxLocation = colIndex(["موقع العمل", "الموقع"]);
+      const idxOwner = colIndex(["الشركة", "المالك"]);
+      const idxCostCode = colIndex(["كود التكلفة"]);
+      const idxNotes = colIndex(["ملاحظات"]);
+      if (idxName === -1) {
+        alert('تعذّر التعرف على عمود "الاسم" في الملف.');
+        return;
+      }
+      const matchOwner = (val) => {
+        const nv = normCode(val);
+        const found = SOURCES.find((s) => normCode(s) === nv);
+        return found || SOURCES[0];
+      };
+      const parsed = allRows.slice(1).filter((r) => r[idxName]).map((r) => ({
+        id: uid(),
+        name: r[idxName] || "",
+        jobTitle: idxJob !== -1 ? r[idxJob] || "" : "",
+        location: idxLocation !== -1 ? r[idxLocation] || "" : "",
+        owner: idxOwner !== -1 ? matchOwner(r[idxOwner]) : SOURCES[0],
+        costCode: idxCostCode !== -1 ? r[idxCostCode] || "" : "",
+        notes: idxNotes !== -1 ? r[idxNotes] || "" : "",
+      }));
+      if (parsed.length === 0) {
+        alert("مفيش صفوف صالحة للاستيراد في الملف ده.");
+        return;
+      }
+      setImportPreview(parsed);
+    } catch (err) {
+      alert("تعذّرت قراءة الملف — تأكد من تنسيقه.");
+    }
+  };
+
+  const confirmImport = () => {
+    if (!importPreview) return;
+    onImport(importPreview, importMode);
+    setImportPreview(null);
+    setShowImport(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
   const handlePrint = () => window.print();
 
   return (
@@ -4314,6 +4396,9 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
             <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
               <Printer size={16} /> طباعة
             </button>
+            <button onClick={() => { setShowImport((s) => !s); setShowForm(false); }} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: COLORS.cream, color: COLORS.ink }}>
+              <UploadCloud size={16} /> استيراد
+            </button>
             <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
               {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "إضافة موظف"}
             </button>
@@ -4322,6 +4407,30 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
       />
 
       <KPICard label="إجمالي عدد الموظفين" value={fmtNum(employees.length)} icon={ClipboardList} />
+
+      {showImport && (
+        <SectionCard title="استيراد من إكسل" className="no-print">
+          <div
+            className="border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-50"
+            style={{ borderColor: COLORS.border }}
+            onClick={() => fileRef.current?.click()}
+          >
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])} />
+            <FileSpreadsheet size={26} className="mb-2" style={{ color: COLORS.slateLight }} />
+            <div className="font-bold text-sm" style={{ color: COLORS.ink }}>اضغط لاختيار ملف الموظفين (الاسم، الوظيفة، موقع العمل، الشركة، كود التكلفة، ملاحظات)</div>
+          </div>
+          {importPreview && (
+            <div className="mt-4">
+              <div className="text-sm font-semibold mb-3" style={{ color: COLORS.slate }}>هيتم استيراد {importPreview.length} موظف</div>
+              <div className="flex gap-3 mb-4">
+                <label className="flex items-center gap-2 text-sm"><input type="radio" checked={importMode === "append"} onChange={() => setImportMode("append")} /> إضافة للموجود</label>
+                <label className="flex items-center gap-2 text-sm"><input type="radio" checked={importMode === "replace"} onChange={() => setImportMode("replace")} /> استبدال الكل</label>
+              </div>
+              <button onClick={confirmImport} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>تأكيد الاستيراد</button>
+            </div>
+          )}
+        </SectionCard>
+      )}
 
       {showForm && (
         <form onSubmit={submit} className="no-print">
@@ -4373,7 +4482,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
           <SectionCard><EmptyState icon={ClipboardList} title="لا يوجد موظفين مسجّلين بعد" /></SectionCard>
         ) : (
           SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
-            const list = employees.filter((e) => (e.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+            const list = employees.filter((e) => (e.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => jobPriority(a.jobTitle) - jobPriority(b.jobTitle));
             return (
               <SectionCard
                 key={owner}
