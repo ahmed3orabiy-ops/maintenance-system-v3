@@ -965,6 +965,7 @@ export default function App() {
         { key: "database", label: "قاعدة البيانات", icon: Database },
         { key: "revenue", label: "الإيرادات", icon: Wallet },
         { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
+        { key: "claimPrint", label: "طباعة مستخلص", icon: Printer },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
       ],
@@ -1060,8 +1061,10 @@ export default function App() {
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
-          #print-area table { width: 100% !important; min-width: 0 !important; font-size: 9px; table-layout: fixed; }
-          #print-area th, #print-area td { padding: 3px 4px !important; word-break: break-word; overflow-wrap: break-word; }
+          #print-area table { width: 100% !important; min-width: 0 !important; font-size: 9px; table-layout: auto; }
+          #print-area table.custody-print-table, #print-area table.profit-table { table-layout: fixed; }
+          #print-area th, #print-area td { padding: 3px 4px !important; word-break: normal; overflow-wrap: break-word; }
+          #print-area table.custody-print-table th, #print-area table.custody-print-table td { word-break: break-word !important; }
           #print-area th, #print-area td { border: 1px solid #999; padding: 4px 6px; }
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
@@ -1228,7 +1231,7 @@ export default function App() {
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
-            {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
+            {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
             {view === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} onImport={bulkImportEmployees} />}
             {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
@@ -4829,13 +4832,33 @@ function AuditLogView({ log }) {
 /* ============================================================
    تصدير البيانات
 ============================================================ */
-function ExportView({ expenses, custodies, revenues }) {
+function ExportView({ expenses, custodies, revenues, fuelRecords, oilRecords, equipmentCodes, salaries, subCustodies, subCustodyClearances, auditLog, employees, claims }) {
   const [done, setDone] = useState(false);
+  const [backupDone, setBackupDone] = useState(false);
 
   const handleExport = () => {
     exportToExcel({ expenses, custodies, revenues });
     setDone(true);
     setTimeout(() => setDone(false), 3000);
+  };
+
+  const handleFullBackup = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      expenses, custodies, revenues, fuelRecords, oilRecords, equipmentCodes,
+      salaries, subCustodies, subCustodyClearances, auditLog, employees, claims,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `نسخة_احتياطية_كاملة_${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setBackupDone(true);
+    setTimeout(() => setBackupDone(false), 3000);
   };
 
   return (
@@ -4872,6 +4895,26 @@ function ExportView({ expenses, custodies, revenues }) {
         {done && (
           <div className="mt-4 flex items-center gap-2 text-sm font-semibold" style={{ color: COLORS.success }}>
             <CheckCircle2 size={16} /> تم تحميل الملف بنجاح
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="نسخة احتياطية كاملة">
+        <p className="text-sm mb-5" style={{ color: COLORS.slate }}>
+          هتحمّل ملف واحد (JSON) فيه <b>كل</b> بيانات النظام بالكامل — المصروفات، العهد، الإيرادات، المستخلصات،
+          السولار، الزيوت، أكواد المعدات، المرتبات، العهد الفرعية، الموظفين، وسجل التعديلات. احتفظ بالملف ده
+          في مكان آمن (إيميلك أو تخزين سحابي) كنسخة احتياطية دورية.
+        </p>
+        <button
+          onClick={handleFullBackup}
+          className="px-6 py-3 rounded-lg text-sm font-bold text-white flex items-center gap-2"
+          style={{ background: COLORS.navy }}
+        >
+          <Database size={17} /> تحميل النسخة الاحتياطية الكاملة
+        </button>
+        {backupDone && (
+          <div className="mt-4 flex items-center gap-2 text-sm font-semibold" style={{ color: COLORS.success }}>
+            <CheckCircle2 size={16} /> تم تحميل النسخة الاحتياطية بنجاح
           </div>
         )}
       </SectionCard>
@@ -5882,7 +5925,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
 
           <div className="overflow-x-auto">
           {grouped.map((g) => (
-            <table key={g.cat} className="w-full border-collapse text-xs" style={{ minWidth: 900, marginBottom: 0 }}>
+            <table key={g.cat} className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900, marginBottom: 0 }}>
               <colgroup>
                 <col style={{ width: "3%" }} />
                 <col style={{ width: "7%" }} />
@@ -5936,7 +5979,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
             </table>
           ))}
           <div className="totals-signatures-block">
-          <table className="w-full border-collapse text-xs" style={{ minWidth: 900 }}>
+          <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
             <colgroup>
               <col style={{ width: "3%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
               <col style={{ width: "7%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
