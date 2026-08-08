@@ -671,6 +671,14 @@ export default function App() {
     logAudit("حذف", "كود معدة", c0 ? c0.code : id);
     showToast("تم حذف الكود", "danger");
   };
+  const moveEquipmentCodeToTop = (id) => {
+    const c0 = equipmentCodes.find((x) => x.id === id);
+    if (!c0) return;
+    pushUndo("equipmentCodes", equipmentCodes);
+    saveEquipmentCodes([c0, ...equipmentCodes.filter((c) => c.id !== id)]);
+    logAudit("تعديل", "كود معدة", `نقل ${c0.code} لأعلى القائمة`);
+    showToast("تم نقل الكود لأعلى القائمة");
+  };
   const bulkImportEquipmentCodes = (newCodes, mode) => {
     pushUndo("equipmentCodes", equipmentCodes);
     if (mode === "replace") saveEquipmentCodes(newCodes);
@@ -1130,7 +1138,7 @@ export default function App() {
             {view === "fuel" && <FuelView records={fuelRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addFuelRecord} onDelete={deleteFuelRecord} onImport={bulkImportFuel} />}
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
-            {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
+            {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
             {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
@@ -3064,7 +3072,7 @@ function FuelAnalysisView({ records }) {
 /* ============================================================
    أكواد المعدات (مرجعي)
 ============================================================ */
-function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues, onAdd, onUpdate, onDelete, onImport, onMerge }) {
+function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues, onAdd, onUpdate, onDelete, onImport, onMerge, onMoveToTop }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [showImport, setShowImport] = useState(false);
@@ -3318,6 +3326,7 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
                     <td className="px-4 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1">
+                        <button onClick={() => onMoveToTop(c.id)} title="نقل لأعلى القائمة" className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.gold }}><ChevronLeft size={15} className="rotate-90" /></button>
                         <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-gray-100" style={{ color: COLORS.slate }}><Pencil size={15} /></button>
                         <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={15} /></button>
                       </div>
@@ -4502,7 +4511,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
                       <thead>
                         <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                           {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
-                            <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                            <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)", minWidth: h === "كود التكلفة" ? 200 : undefined }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -4512,9 +4521,9 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
                             <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
                             <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
                             <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap">
+                            <td className="px-4 py-2.5" style={{ minWidth: 200 }}>
                               {emp.costCode ? (
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>
+                                <span className="inline-block px-2 py-1 rounded text-[10px] font-bold whitespace-normal" style={{ background: COLORS.cream, color: COLORS.slate }}>
                                   {emp.costCode}{costCodeMap[emp.costCode]?.type === "مجمع تكلفة" ? " (مجمع تكلفة)" : ""}
                                 </span>
                               ) : "—"}
