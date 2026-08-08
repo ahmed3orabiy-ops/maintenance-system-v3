@@ -85,6 +85,18 @@ const fmtNum = (n) => (Number(n) || 0).toLocaleString("ar-EG");
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const ARABIC_MONTH_NAMES = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+function claimPeriodLabel(claimMonth) {
+  // claimMonth بصيغة "YYYY-MM" — الفترة بتبدأ يوم 26 من الشهر اللي قبله وتنتهي يوم 25 من نفس الشهر
+  if (!claimMonth) return "";
+  const [y, m] = claimMonth.split("-").map(Number);
+  if (!y || !m) return "";
+  const endY = y, endM = m;
+  const startM = m === 1 ? 12 : m - 1;
+  const startY = m === 1 ? y - 1 : y;
+  return `من 26 ${ARABIC_MONTH_NAMES[startM - 1]} ${startY} إلى 25 ${ARABIC_MONTH_NAMES[endM - 1]} ${endY}`;
+}
+
 function classifyVehiclePurpose(purpose = "") {
   if (purpose.includes("كارت") || purpose.includes("ميزان") || purpose.includes("موازين")) return "كارتات وموازين";
   if (purpose.includes("سائق")) return "مصروفات سائقين";
@@ -236,29 +248,18 @@ const KPI_ACCENTS = {
 };
 
 function KPICard({ label, value, sub, tone = "navy", icon: Icon, accent }) {
-  const isGold = tone === "gold";
-  const bg = isGold ? `linear-gradient(165deg, ${COLORS.paper}, ${COLORS.cream})` : `linear-gradient(155deg, ${COLORS.navy}, ${COLORS.navyDeep})`;
-  const textColor = isGold ? COLORS.ink : "white";
-  const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.62)";
-  const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.55)";
-  const iconColors = accent && KPI_ACCENTS[accent] ? KPI_ACCENTS[accent] : (isGold ? { bg: `${COLORS.goldSoft}45`, fg: COLORS.gold } : { bg: "rgba(255,255,255,0.10)", fg: "rgba(255,255,255,0.9)" });
+  const iconColors = accent && KPI_ACCENTS[accent] ? KPI_ACCENTS[accent] : { bg: `${COLORS.goldSoft}45`, fg: COLORS.gold };
   return (
     <div
       style={{
-        background: bg,
+        background: `linear-gradient(165deg, ${COLORS.paper}, ${COLORS.cream})`,
         borderRadius: 16,
-        border: isGold ? `1px solid ${COLORS.border}` : "none",
-        boxShadow: isGold ? "0 2px 4px rgba(16,26,46,0.06), 0 16px 32px -16px rgba(16,26,46,0.22)" : "0 16px 36px -14px rgba(4,7,12,0.55)",
+        border: `1px solid ${COLORS.border}`,
+        boxShadow: "0 2px 4px rgba(16,26,46,0.06), 0 16px 32px -16px rgba(16,26,46,0.22)",
       }}
       className="relative flex-1 min-w-[150px] p-4 md:p-5 overflow-hidden transition-transform duration-200 hover:-translate-y-1"
     >
       <div className="absolute top-0 right-0 left-0 h-[4px]" style={{ background: `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.teal})` }} />
-      {!isGold && (
-        <>
-          <div className="absolute -left-8 -top-8 w-28 h-28 rounded-full" style={{ background: "rgba(255,255,255,0.04)" }} />
-          <div className="absolute -left-3 -bottom-10 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,0.03)" }} />
-        </>
-      )}
       <div className="relative flex items-center gap-3">
         {Icon && (
           <div
@@ -269,11 +270,11 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon, accent }) {
           </div>
         )}
         <div className="min-w-0">
-          <div className="text-[11px] font-bold tracking-wide mb-1 truncate" style={{ color: labelColor, letterSpacing: "0.01em" }}>{label}</div>
-          <div className="text-[22px] leading-none font-extrabold tabular-nums" style={{ color: textColor, letterSpacing: "-0.01em" }}>{value}</div>
+          <div className="text-[11px] font-bold tracking-wide mb-1 truncate" style={{ color: COLORS.slate, letterSpacing: "0.01em" }}>{label}</div>
+          <div className="text-[22px] leading-none font-extrabold tabular-nums" style={{ color: COLORS.ink, letterSpacing: "-0.01em" }}>{value}</div>
         </div>
       </div>
-      {sub && <div className="relative text-xs mt-3" style={{ color: subColor }}>{sub}</div>}
+      {sub && <div className="relative text-xs mt-3" style={{ color: COLORS.slateLight }}>{sub}</div>}
     </div>
   );
 }
@@ -468,6 +469,7 @@ export default function App() {
   const [subCustodyClearances, saveSubCustodyClearances, subClearancesLoaded] = useStorage("subCustodyClearances", []);
   const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
   const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
+  const [claims, saveClaims, claimsLoaded] = useStorage("claims", []);
   const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
@@ -892,6 +894,33 @@ export default function App() {
     showToast("تم حذف الموظف", "danger");
   };
 
+  const addClaim = (c) => {
+    pushUndo("claims", claims);
+    const monthlyRate = Number(c.monthlyRate) || 0;
+    const hourlyRate = monthlyRate / 196;
+    const hoursWorked = Number(c.hoursWorked) || 0;
+    saveClaims([...claims, { ...c, hourlyRate, total: hourlyRate * hoursWorked, id: uid() }]);
+    logAudit("إضافة", "مستخلص", `${c.owner || ""} — ${c.equipmentCode || "بند مستخلص"} — ${c.claimMonth || ""}`);
+    showToast("تم حفظ بند المستخلص");
+  };
+  const updateClaim = (id, updates) => {
+    const c0 = claims.find((x) => x.id === id);
+    pushUndo("claims", claims);
+    const monthlyRate = Number(updates.monthlyRate) || 0;
+    const hourlyRate = monthlyRate / 196;
+    const hoursWorked = Number(updates.hoursWorked) || 0;
+    saveClaims(claims.map((c) => (c.id === id ? { ...c, ...updates, hourlyRate, total: hourlyRate * hoursWorked } : c)));
+    logAudit("تعديل", "مستخلص", c0 ? c0.equipmentCode : id);
+    showToast("تم تعديل بند المستخلص");
+  };
+  const deleteClaim = (id) => {
+    const c0 = claims.find((x) => x.id === id);
+    pushUndo("claims", claims);
+    saveClaims(claims.filter((c) => c.id !== id));
+    logAudit("حذف", "مستخلص", c0 ? c0.equipmentCode : id);
+    showToast("تم حذف بند المستخلص", "danger");
+  };
+
   const subCustodyTotals = useMemo(() => {
     const map = {};
     for (const c of subCustodies) {
@@ -917,7 +946,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded;
 
   const NAV_GROUPS = [
     {
@@ -935,6 +964,7 @@ export default function App() {
         { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
         { key: "database", label: "قاعدة البيانات", icon: Database },
         { key: "revenue", label: "الإيرادات", icon: Wallet },
+        { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
       ],
@@ -1060,7 +1090,7 @@ export default function App() {
       {showSidebar && !isEmbedded && (
       <aside
         className={isDesktop ? "w-64 shrink-0 flex flex-col text-white" : "w-64 shrink-0 flex flex-col text-white fixed inset-y-0 right-0 z-30"}
-        style={{ background: `linear-gradient(185deg, ${COLORS.navy}, ${COLORS.navyDeep})` }}
+        style={{ background: `linear-gradient(195deg, #16324F, #0B3B37)` }}
       >
         <div className="px-5 py-6 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -1183,6 +1213,7 @@ export default function App() {
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
+            {view === "claims" && <ClaimsView claims={claims} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addClaim} onUpdate={updateClaim} onDelete={deleteClaim} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
@@ -5247,6 +5278,209 @@ function RevenueAnalysisView({ revenues, expenses }) {
   );
 }
 
+/* ============================================================
+   المستخلصات
+============================================================ */
+function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelete }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [q, setQ] = useState("");
+  const [monthFilter, setMonthFilter] = useState({}); // { [owner]: "الكل" | claimMonth }
+  const [printOwner, setPrintOwner] = useState("الكل");
+  const empty = { owner: SOURCES[0], claimMonth: todayISO().slice(0, 7), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
+  const [form, setForm] = useState(empty);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const knownLocations = useMemo(() => {
+    const s = new Set();
+    equipmentCodes.forEach((c) => { if (c.location) s.add(cleanText(c.location)); });
+    expenses.forEach((e) => { if (e.location) s.add(cleanText(e.location)); });
+    return [...s].sort();
+  }, [equipmentCodes, expenses]);
+
+  const handleCodeChange = (e) => {
+    const code = e.target.value;
+    const known = equipmentCodes.find((c) => c.code === code);
+    setForm((f) => ({ ...f, equipmentCode: code, owner: known && known.owner ? known.owner : f.owner, location: known && known.location ? known.location : f.location }));
+  };
+
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
+  const startEdit = (c) => {
+    setEditingId(c.id);
+    setForm({ owner: c.owner || SOURCES[0], claimMonth: c.claimMonth || todayISO().slice(0, 7), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
+    setShowForm(true);
+  };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (editingId) onUpdate(editingId, form);
+    else onAdd(form);
+    cancel();
+  };
+
+  const term = q.trim().toLowerCase();
+  const matches = (c) => !term || [c.equipmentCode, c.location, c.notes].join(" ").toLowerCase().includes(term);
+
+  const hourlyPreview = (Number(form.monthlyRate) || 0) / 196;
+  const totalPreview = hourlyPreview * (Number(form.hoursWorked) || 0);
+
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="المستخلصات"
+        sub="مستخلص شهري لكل شركة بأعمال معداتها — الفترة من 26 لحد 25 من كل شهر"
+        action={
+          <div className="no-print flex flex-wrap gap-2">
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+              <Printer size={16} /> طباعة
+            </button>
+            <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند مستخلص جديد"}
+            </button>
+          </div>
+        }
+      />
+
+      <div className="no-print grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="relative md:col-span-1">
+          <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو الموقع أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+        </div>
+        <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+          {["الكل", ...SOURCES].map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setPrintOwner(opt)}
+              className="px-3 py-2 rounded-lg text-xs font-bold"
+              style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {showForm && (
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند مستخلص" : "بند مستخلص جديد"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="شهر المستخلص" required><TextInput type="month" value={form.claimMonth} onChange={set("claimMonth")} required /></Field>
+              <Field label="الجهة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+              <Field label="كود المعدة" required>
+                <TextInput list="claim-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
+                <datalist id="claim-codes">{equipmentCodes.map((c) => <option key={c.id} value={c.code} />)}</datalist>
+              </Field>
+              <Field label="موقع العمل">
+                <Select value={form.location} onChange={set("location")}>
+                  <option value="">اختر الموقع...</option>
+                  {knownLocations.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {form.location && !knownLocations.includes(form.location) && <option value={form.location}>{form.location}</option>}
+                </Select>
+              </Field>
+              <Field label="الأجر الشهري" required><TextInput type="number" step="0.01" value={form.monthlyRate} onChange={set("monthlyRate")} required placeholder="0" /></Field>
+              <Field label="عدد ساعات العمل" required><TextInput type="number" step="0.01" value={form.hoursWorked} onChange={set("hoursWorked")} required placeholder="0" /></Field>
+              <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
+            </div>
+            <div className="flex items-center justify-between mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+              <div className="text-sm" style={{ color: COLORS.slate }}>
+                الأجر بالساعة: <b style={{ color: COLORS.ink }}>{fmtMoney(hourlyPreview)}</b> — الإجمالي: <b style={{ color: COLORS.ink }}>{fmtMoney(totalPreview)}</b>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-4 pt-2">
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ البند"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div id="print-area">
+        <PrintLetterhead />
+        {claims.length === 0 ? (
+          <SectionCard><EmptyState icon={FileSpreadsheet} title="لا توجد مستخلصات مسجلة بعد" /></SectionCard>
+        ) : (
+          SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
+            const ownerAll = claims.filter((c) => (c.owner || SOURCES[0]) === owner).filter(matches);
+            const months = [...new Set(ownerAll.map((c) => c.claimMonth))].sort().reverse();
+            const activeMonth = monthFilter[owner] || "الكل";
+            const list = ownerAll.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
+            const total = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+            return (
+              <SectionCard
+                key={owner}
+                className={idx > 0 ? "print-page-break" : ""}
+                title={`مستخلص ${owner} (${list.length}) — ${fmtMoney(total)}`}
+                action={
+                  <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                    <Plus size={13} className="inline -mt-0.5" /> إضافة لـ {owner}
+                  </button>
+                }
+              >
+                {activeMonth !== "الكل" && (
+                  <div className="text-xs font-bold mb-3" style={{ color: COLORS.gold }}>الفترة: {claimPeriodLabel(activeMonth)}</div>
+                )}
+                <div className="no-print flex flex-wrap items-center gap-2 mb-4">
+                  <span className="text-xs font-bold" style={{ color: COLORS.slate }}>الشهر:</span>
+                  <button onClick={() => setMonthFilter((f) => ({ ...f, [owner]: "الكل" }))} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === "الكل" ? COLORS.navy : COLORS.cream, color: activeMonth === "الكل" ? "white" : COLORS.slate }}>الكل</button>
+                  {months.map((m) => (
+                    <button key={m} onClick={() => setMonthFilter((f) => ({ ...f, [owner]: m }))} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === m ? COLORS.navy : COLORS.cream, color: activeMonth === m ? "white" : COLORS.slate }}>{m}</button>
+                  ))}
+                </div>
+
+                {list.length === 0 ? (
+                  <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود مطابقة</div>
+                ) : (
+                  <div className="overflow-x-auto -mx-5">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                          {["كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
+                            <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map((c) => (
+                          <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                            <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
+                            <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
+                            <td className="px-3 py-2.5">{c.notes || "—"}</td>
+                            <td className="px-3 py-2.5 no-print">
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                                <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   الإيرادات
+============================================================ */
 function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
