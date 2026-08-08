@@ -357,11 +357,12 @@ function EmptyState({ icon: Icon, title, sub }) {
 
 function PrintLetterhead() {
   return (
-    <div className="flex items-center gap-3 mb-4 pb-3" style={{ borderBottom: "2px solid #B08D42" }}>
-      <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 44, objectFit: "contain" }} />
+    <div className="print-letterhead flex items-center gap-4 mb-4 pb-3" style={{ borderBottom: "2px solid #B08D42" }}>
+      <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 48, objectFit: "contain" }} />
+      <div style={{ borderRight: "1px solid #E3DDCE", height: 36, margin: "0 2px" }} />
       <div>
-        <div className="font-extrabold text-base" style={{ color: "#101A2E" }}>شركة الرابح للمقاولات والتوريدات</div>
-        <div className="text-xs" style={{ color: "#5B6579" }}>فرع الصيانة والتشغيل</div>
+        <div className="co-name font-extrabold" style={{ color: "#101A2E", letterSpacing: "0.01em" }}>شركة الرابح للمقاولات والتوريدات</div>
+        <div className="co-dept font-semibold" style={{ color: "#8A5F1E" }}>فرع الصيانة والتشغيل</div>
       </div>
     </div>
   );
@@ -968,6 +969,7 @@ export default function App() {
         { key: "claimPrint", label: "طباعة مستخلص", icon: Printer },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
+        { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
       ],
     },
     {
@@ -975,6 +977,7 @@ export default function App() {
       items: [
         { key: "equipment", label: "بطاقة أداء المعدات", icon: Wrench },
         { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
+        { key: "equipmentComparison", label: "مقارنة المعدات المتشابهة", icon: BarChart3 },
         { key: "maintenanceLog", label: "سجل الصيانة", icon: ListChecks },
         { key: "fuel", label: "السولار", icon: Fuel },
         { key: "oils", label: "الزيوت والفلاتر", icon: Wrench },
@@ -1057,15 +1060,28 @@ export default function App() {
         .profit-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; }
         .profit-summary-box { flex: 1 1 22%; min-width: 130px; }
         @media print {
+          @page { margin: 12mm 10mm; }
           body, html { background: #FFFFFF !important; }
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
-          #print-area table { width: 100% !important; min-width: 0 !important; font-size: 9px; table-layout: auto; }
+          #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; border-collapse: collapse; }
           #print-area table.custody-print-table, #print-area table.profit-table { table-layout: fixed; }
-          #print-area th, #print-area td { padding: 3px 4px !important; word-break: normal; overflow-wrap: break-word; }
-          #print-area table.custody-print-table th, #print-area table.custody-print-table td { word-break: break-word !important; }
-          #print-area th, #print-area td { border: 1px solid #999; padding: 4px 6px; }
+          /* الجداول العادية (كل حاجة ماعدا طباعة عهدة والربحية) — تنسيق أنضف */
+          #print-area table:not(.custody-print-table):not(.profit-table) { font-size: 9.5px; }
+          #print-area table:not(.custody-print-table):not(.profit-table) th,
+          #print-area table:not(.custody-print-table):not(.profit-table) td { padding: 6px 8px !important; word-break: normal; overflow-wrap: break-word; line-height: 1.45; border: 1px solid #DEDACC; }
+          #print-area table:not(.custody-print-table):not(.profit-table) thead th {
+            padding: 9px 8px !important; font-weight: 800; font-size: 10px; letter-spacing: 0.01em; border-color: #1B2A41;
+          }
+          #print-area table:not(.custody-print-table) tbody tr:nth-child(even) td { background: #F8F6F0; }
+          /* طباعة عهدة — بدون أي تغيير عن الشكل الأصلي */
+          #print-area table.custody-print-table th, #print-area table.custody-print-table td {
+            border: 1px solid #999; padding: 4px 6px; font-size: 9px; word-break: break-word !important;
+          }
+          .print-letterhead { padding-bottom: 14px; margin-bottom: 16px; border-bottom: 3px solid #B08D42; }
+          .print-letterhead .co-name { font-size: 16px; }
+          .print-letterhead .co-dept { font-size: 12px; margin-top: 2px; }
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
@@ -1217,11 +1233,13 @@ export default function App() {
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
             {view === "claims" && <ClaimsView claims={claims} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addClaim} onUpdate={updateClaim} onDelete={deleteClaim} />}
+            {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
             {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
             {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
+            {view === "equipmentComparison" && <EquipmentComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
             {view === "maintenanceLog" && <MaintenanceLogView expenses={expenses} />}
             {view === "fuel" && <FuelView records={fuelRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addFuelRecord} onDelete={deleteFuelRecord} onImport={bulkImportFuel} />}
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
@@ -1229,6 +1247,7 @@ export default function App() {
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
             {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
+            {view === "claimPrint" && <ClaimPrintView claims={claims} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
@@ -3896,6 +3915,99 @@ const cleanText = (s) =>
     .trim();
 
 
+/* ============================================================
+   مقارنة المعدات المتشابهة
+============================================================ */
+function EquipmentComparisonView({ expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes }) {
+  const [selectedType, setSelectedType] = useState("الكل");
+
+  const rows = useMemo(() => {
+    return equipmentCodes.filter((c) => !isCostPoolCode(c.code)).map((c) => {
+      const nc = normCode(c.code);
+      const directExpense = expenses.filter((e) => normCode(e.equipmentCode) === nc).reduce((s, e) => s + (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0), 0);
+      const fuelCost = fuelRecords.filter((r) => normCode(r.code) === nc).reduce((s, r) => s + (Number(r.total) || 0), 0);
+      const oilCost = oilRecords.filter((r) => normCode(r.equipmentCode) === nc).reduce((s, r) => s + (Number(r.total) || 0), 0);
+      const salaryCost = salaries.filter((s) => s.salaryType === "driver" && normCode(s.equipmentCode) === nc).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      const totalCost = directExpense + fuelCost + oilCost + salaryCost;
+      const revenue = revenues.filter((r) => normCode(r.equipmentCode) === nc).reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
+      return { code: c.code, type: c.type || "غير محدد", owner: c.owner, location: c.location, totalCost, revenue, net: revenue - totalCost };
+    });
+  }, [equipmentCodes, expenses, fuelRecords, oilRecords, salaries, revenues]);
+
+  const types = useMemo(() => ["الكل", ...new Set(rows.map((r) => r.type))], [rows]);
+  const grouped = useMemo(() => {
+    const byType = {};
+    rows.forEach((r) => { if (!byType[r.type]) byType[r.type] = []; byType[r.type].push(r); });
+    return Object.entries(byType)
+      .filter(([type]) => selectedType === "الكل" || type === selectedType)
+      .map(([type, items]) => {
+        const avgCost = items.reduce((s, i) => s + i.totalCost, 0) / (items.length || 1);
+        return { type, items: [...items].sort((a, b) => b.totalCost - a.totalCost), avgCost };
+      });
+  }, [rows, selectedType]);
+
+  return (
+    <div className="space-y-6">
+      <Header title="مقارنة المعدات المتشابهة" sub="كل نوع معدة مع زمايله من نفس الفئة، عشان تكتشف المعدات اللي تكلفتها أعلى من المتوسط" />
+
+      <div className="flex flex-wrap gap-2">
+        {types.map((t) => (
+          <button
+            key={t}
+            onClick={() => setSelectedType(t)}
+            className="px-3.5 py-2 rounded-lg text-xs font-bold"
+            style={{ background: selectedType === t ? COLORS.navy : COLORS.cream, color: selectedType === t ? "white" : COLORS.slate }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {grouped.length === 0 ? (
+        <SectionCard><EmptyState icon={BarChart3} title="لا توجد بيانات كافية للمقارنة" /></SectionCard>
+      ) : (
+        grouped.map((g) => (
+          <SectionCard key={g.type} title={`${g.type} (${g.items.length}) — متوسط التكلفة: ${fmtMoney(g.avgCost)}`}>
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["كود المعدة", "المالك", "الموقع", "إجمالي التكلفة", "الإيراد", "صافي الربح", "الحالة"].map((h) => (
+                      <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.items.map((r) => {
+                    const overAvg = g.avgCost > 0 && r.totalCost > g.avgCost * 1.2;
+                    return (
+                      <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
+                        <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{r.code}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">{r.owner}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">{r.location || "—"}</td>
+                        <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap" style={{ color: overAvg ? COLORS.danger : COLORS.ink }}>{fmtMoney(r.totalCost)}</td>
+                        <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(r.revenue)}</td>
+                        <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap" style={{ color: r.net >= 0 ? COLORS.success : COLORS.danger }}>{fmtMoney(r.net)}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap">
+                          {overAvg ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.dangerBg, color: COLORS.danger }}>تكلفة أعلى من المتوسط</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.successBg, color: COLORS.success }}>طبيعي</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        ))
+      )}
+    </div>
+  );
+}
+
 function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes }) {
   // يحل أي كود لصورته الموحّدة، حتى لو كلماته مكتوبة بترتيب مختلف (مثال: "8619 ط ط ر" و"ط ط ر 8619")
   const resolveCode = useMemo(() => {
@@ -5324,6 +5436,88 @@ function RevenueAnalysisView({ revenues, expenses }) {
 /* ============================================================
    المستخلصات
 ============================================================ */
+/* ============================================================
+   مقارنة الشركتين
+============================================================ */
+function CompanyComparisonView({ expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes, claims, employees }) {
+  const ownerByCode = useMemo(() => {
+    const map = {};
+    equipmentCodes.forEach((c) => { if (c.owner) map[normCode(c.code)] = c.owner; });
+    expenses.forEach((e) => { const nc = normCode(e.equipmentCode); if (nc && e.source && !map[nc]) map[nc] = e.source; });
+    return map;
+  }, [equipmentCodes, expenses]);
+
+  const stats = SOURCES.map((owner) => {
+    const ownerExpenses = expenses.filter((e) => e.source === owner).reduce((s, e) => s + (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0), 0);
+    const ownerFuel = fuelRecords.filter((r) => (ownerByCode[normCode(r.code)] || SOURCES[0]) === owner).reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const ownerOil = oilRecords.filter((r) => (r.location ? true : true) && (ownerByCode[normCode(r.equipmentCode)] || SOURCES[0]) === owner).reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const ownerSalaries = salaries.filter((s) => s.source === owner).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    const totalExpenses = ownerExpenses + ownerFuel + ownerOil + ownerSalaries;
+    const ownerRevenue = revenues.filter((r) => (r.owner || SOURCES[0]) === owner).reduce((s, r) => s + (Number(r.amount ?? r.total) || 0), 0);
+    const ownerClaims = claims.filter((c) => c.owner === owner).reduce((s, c) => s + (Number(c.total) || 0), 0);
+    const equipmentCount = equipmentCodes.filter((c) => c.owner === owner).length;
+    const employeeCount = employees.filter((e) => e.owner === owner).length;
+    return { owner, ownerExpenses, ownerFuel, ownerOil, ownerSalaries, totalExpenses, ownerRevenue, ownerClaims, netProfit: ownerRevenue - totalExpenses, equipmentCount, employeeCount };
+  });
+
+  const chartData = [
+    { name: "الإيرادات", ...Object.fromEntries(stats.map((s) => [s.owner, s.ownerRevenue])) },
+    { name: "المصروفات", ...Object.fromEntries(stats.map((s) => [s.owner, s.totalExpenses])) },
+    { name: "صافي الربح", ...Object.fromEntries(stats.map((s) => [s.owner, s.netProfit])) },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <Header title="مقارنة الشركتين" sub="نظرة جنب بعض على أداء هدي الإسلام والكيان الهندسي" />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {stats.map((s) => (
+          <SectionCard key={s.owner} title={s.owner}>
+            <div className="grid grid-cols-2 gap-3 mb-2">
+              <div className="text-center p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي الإيرادات</div>
+                <div className="font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(s.ownerRevenue)}</div>
+              </div>
+              <div className="text-center p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المصروفات</div>
+                <div className="font-extrabold tabular-nums" style={{ color: COLORS.ink }}>{fmtMoney(s.totalExpenses)}</div>
+              </div>
+              <div className="text-center p-3 rounded-lg col-span-2" style={{ background: s.netProfit >= 0 ? COLORS.successBg : COLORS.dangerBg }}>
+                <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>صافي الربح</div>
+                <div className="font-extrabold tabular-nums text-lg" style={{ color: s.netProfit >= 0 ? COLORS.success : COLORS.danger }}>{fmtMoney(s.netProfit)}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs mt-3" style={{ color: COLORS.slate }}>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>مصروفات عهد</span><b style={{ color: COLORS.ink }}>{fmtMoney(s.ownerExpenses)}</b></div>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>سولار</span><b style={{ color: COLORS.ink }}>{fmtMoney(s.ownerFuel)}</b></div>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>زيوت وفلاتر</span><b style={{ color: COLORS.ink }}>{fmtMoney(s.ownerOil)}</b></div>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>مرتبات</span><b style={{ color: COLORS.ink }}>{fmtMoney(s.ownerSalaries)}</b></div>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>إجمالي المستخلصات</span><b style={{ color: COLORS.ink }}>{fmtMoney(s.ownerClaims)}</b></div>
+              <div className="flex justify-between border-b pb-1.5" style={{ borderColor: COLORS.border }}><span>عدد المعدات</span><b style={{ color: COLORS.ink }}>{fmtNum(s.equipmentCount)}</b></div>
+              <div className="flex justify-between pb-1.5"><span>عدد الموظفين</span><b style={{ color: COLORS.ink }}>{fmtNum(s.employeeCount)}</b></div>
+            </div>
+          </SectionCard>
+        ))}
+      </div>
+
+      <SectionCard title="مقارنة بصرية">
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+            <XAxis dataKey="name" tick={{ fontSize: 12, fill: COLORS.slate }} />
+            <YAxis tick={{ fontSize: 11, fill: COLORS.slate }} tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)} />
+            <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 10, border: `1px solid ${COLORS.border}` }} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            {SOURCES.map((owner, i) => (
+              <Bar key={owner} dataKey={owner} fill={i === 0 ? COLORS.gold : COLORS.teal} radius={[6, 6, 0, 0]} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </SectionCard>
+    </div>
+  );
+}
+
 function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -5997,6 +6191,130 @@ function PrintView({ custodies, custodyTotals, expenses }) {
           </table>
           </div>
           </div>
+
+          <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
+            {SIGNATURES.map((s) => (
+              <div key={s} className="text-center">
+                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>التوقيع / {s}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   طباعة مستخلص
+============================================================ */
+function ClaimPrintView({ claims }) {
+  const ownerMonths = useMemo(() => {
+    const set = new Set();
+    claims.forEach((c) => set.add(`${c.owner}|||${c.claimMonth}`));
+    return [...set].map((k) => { const [owner, claimMonth] = k.split("|||"); return { owner, claimMonth }; }).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
+  }, [claims]);
+
+  const [selectedKey, setSelectedKey] = useState(ownerMonths[0] ? `${ownerMonths[0].owner}|||${ownerMonths[0].claimMonth}` : "");
+  const [selOwner, selMonth] = selectedKey ? selectedKey.split("|||") : ["", ""];
+  const items = claims.filter((c) => c.owner === selOwner && c.claimMonth === selMonth).sort((a, b) => (a.equipmentCode || "").localeCompare(b.equipmentCode || ""));
+  const total = items.reduce((s, c) => s + (Number(c.total) || 0), 0);
+
+  const handlePrint = () => window.print();
+
+  if (ownerMonths.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Header title="طباعة مستخلص" />
+        <SectionCard><EmptyState icon={Printer} title="لا توجد مستخلصات لطباعتها" sub="ضيف بنود مستخلص الأول من تاب المستخلصات" /></SectionCard>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="no-print">
+        <Header
+          title="طباعة مستخلص"
+          sub="اختار الجهة والشهر وهيتجهز نموذج مستخلص رسمي جاهز للطباعة"
+          action={
+            <button onClick={handlePrint} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: "#C69A3C", color: "#101A2E" }}>
+              <Printer size={16} /> طباعة / PDF
+            </button>
+          }
+        />
+        <div className="mt-4 max-w-sm">
+          <Field label="اختر الجهة والشهر">
+            <Select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)}>
+              {ownerMonths.map((om) => (
+                <option key={`${om.owner}|||${om.claimMonth}`} value={`${om.owner}|||${om.claimMonth}`}>
+                  {om.owner} — {om.claimMonth}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      </div>
+
+      {selOwner && (
+        <div id="print-area" className="bg-white border rounded-2xl p-6 text-xs custody-print-area" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
+          <div className="flex items-center justify-between border-b-2 pb-3 mb-3" style={{ borderColor: "#101A2E" }}>
+            <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 40, objectFit: "contain" }} />
+            <div className="text-center">
+              <div className="font-extrabold text-base display-font" style={{ color: "#C69A3C" }}>مستخلص أعمال معدات</div>
+              <div className="font-bold">{selOwner}</div>
+            </div>
+            <div className="text-left text-[11px]" style={{ color: "#5B6579" }}>
+              <div>{claimPeriodLabel(selMonth)}</div>
+            </div>
+          </div>
+
+          <div className="text-center mb-3">
+            <div className="inline-block text-center p-3 rounded-lg" style={{ background: "#101A2E" }}>
+              <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>إجمالي المستخلص</div>
+              <div className="font-extrabold tabular-nums text-lg" style={{ color: "#FFFFFF" }}>{fmtMoney(total)}</div>
+            </div>
+          </div>
+
+          <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
+            <colgroup>
+              <col style={{ width: "5%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "10%" }} />
+            </colgroup>
+            <thead>
+              <tr style={{ background: "#101A2E", color: "white" }}>
+                {["م", "كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات"].map((h) => (
+                  <th key={h} className="border px-2.5 py-2.5 font-bold" style={{ borderColor: "#101A2E" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((c, i) => (
+                <tr key={c.id}>
+                  <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                  <td className="border px-2.5 py-2 text-center font-semibold" style={{ borderColor: "#E3DDCE" }}>{c.equipmentCode}</td>
+                  <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{c.location || "—"}</td>
+                  <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtMoney(c.monthlyRate)}</td>
+                  <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtMoney(c.hourlyRate)}</td>
+                  <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtNum(c.hoursWorked)}</td>
+                  <td className="border px-2.5 py-2 text-center tabular-nums font-bold" style={{ borderColor: "#E3DDCE" }}>{fmtMoney(c.total)}</td>
+                  <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{c.notes || "—"}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#101A2E", color: "white" }}>
+                <td colSpan={6} className="border px-3 py-2 font-extrabold text-center" style={{ borderColor: "#101A2E" }}>الإجمالي</td>
+                <td className="border px-2.5 py-2 text-center font-bold tabular-nums" style={{ borderColor: "#101A2E" }}>{fmtMoney(total)}</td>
+                <td className="border px-2.5 py-2" style={{ borderColor: "#101A2E" }}></td>
+              </tr>
+            </tbody>
+          </table>
 
           <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
             {SIGNATURES.map((s) => (
