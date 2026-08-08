@@ -443,6 +443,7 @@ export default function App() {
   const [subCustodies, saveSubCustodies, subCustodiesLoaded] = useStorage("subCustodies", []);
   const [subCustodyClearances, saveSubCustodyClearances, subClearancesLoaded] = useStorage("subCustodyClearances", []);
   const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
+  const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
   const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
@@ -829,6 +830,28 @@ export default function App() {
     logAudit("حذف", "تصفية عهدة فرعية", id);
     showToast("تم حذف بند التصفية", "danger");
   };
+
+  const addEmployee = (emp) => {
+    pushUndo("employees", employees);
+    saveEmployees([...employees, { ...emp, id: uid() }]);
+    logAudit("إضافة", "موظف", emp.name || "موظف جديد");
+    showToast("تم إضافة الموظف");
+  };
+  const updateEmployee = (id, updates) => {
+    const e0 = employees.find((x) => x.id === id);
+    pushUndo("employees", employees);
+    saveEmployees(employees.map((e) => (e.id === id ? { ...e, ...updates } : e)));
+    logAudit("تعديل", "موظف", e0 ? e0.name : id);
+    showToast("تم تعديل بيانات الموظف");
+  };
+  const deleteEmployee = (id) => {
+    const e0 = employees.find((x) => x.id === id);
+    pushUndo("employees", employees);
+    saveEmployees(employees.filter((e) => e.id !== id));
+    logAudit("حذف", "موظف", e0 ? e0.name : id);
+    showToast("تم حذف الموظف", "danger");
+  };
+
   const subCustodyTotals = useMemo(() => {
     const map = {};
     for (const c of subCustodies) {
@@ -854,7 +877,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded;
 
   const NAV = [
     { key: "home", label: "الصفحة الرئيسية", icon: Building2 },
@@ -878,6 +901,7 @@ export default function App() {
     { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
     { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
     { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
+    { key: "employees", label: "الموظفين", icon: ClipboardList },
     { key: "auditLog", label: "سجل التعديلات", icon: ListChecks },
   ];
 
@@ -1103,6 +1127,7 @@ export default function App() {
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
+            {view === "employees" && <EmployeesView employees={employees} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} />}
             {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
         )}
@@ -3037,6 +3062,7 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState("append");
   const [mergeChoice, setMergeChoice] = useState({});
+  const [printOwner, setPrintOwner] = useState("الكل");
   const fileRef = useRef(null);
   const empty = { code: "", type: "", brand: "", owner: SOURCES[0], location: "" };
   const [form, setForm] = useState(empty);
@@ -3295,16 +3321,53 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
         </SectionCard>
       )}
 
-      <div className="print-only-area" id="print-area">
-        <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>أكواد المعدات</h2>
-        <table>
-          <thead><tr>{["كود المعدة", "النوع", "الماركة", "المالك", "الموقع"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-          <tbody>
-            {codes.map((c) => (
-              <tr key={c.id}><td>{c.code}</td><td>{c.type}</td><td>{c.brand}</td><td>{c.owner}</td><td>{c.location}</td></tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="no-print flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+        {["الكل", ...SOURCES].map((opt) => (
+          <button
+            key={opt}
+            onClick={() => setPrintOwner(opt)}
+            className="px-3 py-2 rounded-lg text-xs font-bold"
+            style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+
+      <div id="print-area">
+        {SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner) => {
+          const ownerCodes = codes.filter((c) => c.owner === owner);
+          return (
+            <SectionCard key={owner} title={`أكواد معدات ${owner} (${ownerCodes.length})`}>
+              {ownerCodes.length === 0 ? (
+                <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد أكواد مسجلة لـ {owner}</div>
+              ) : (
+                <div className="overflow-x-auto -mx-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                        {["كود المعدة", "النوع", "الماركة", "الموقع"].map((h) => (
+                          <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ownerCodes.map((c) => (
+                        <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                          <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{c.code}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{c.type || "—"}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{c.brand || "—"}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SectionCard>
+          );
+        })}
       </div>
     </div>
   );
@@ -4199,6 +4262,123 @@ function toISODate(val) {
     return trimmed;
   }
   return "";
+}
+
+/* ============================================================
+   الموظفين
+============================================================ */
+function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [q, setQ] = useState("");
+  const empty = { name: "", jobTitle: "", location: "", notes: "" };
+  const [form, setForm] = useState(empty);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const startAdd = () => { setEditingId(null); setForm(empty); setShowForm(true); };
+  const startEdit = (emp) => {
+    setEditingId(emp.id);
+    setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", notes: emp.notes || "" });
+    setShowForm(true);
+  };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (editingId) onUpdate(editingId, form);
+    else onAdd(form);
+    cancel();
+  };
+
+  const term = q.trim().toLowerCase();
+  const filtered = useMemo(
+    () =>
+      [...employees]
+        .filter((e) => !term || [e.name, e.jobTitle, e.location, e.notes].join(" ").toLowerCase().includes(term))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar")),
+    [employees, term]
+  );
+
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="الموظفين"
+        sub="سجل بالموظفين، وظائفهم، ومواقع عملهم"
+        action={
+          <div className="no-print flex flex-wrap gap-2">
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+              <Printer size={16} /> طباعة
+            </button>
+            <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "إضافة موظف"}
+            </button>
+          </div>
+        }
+      />
+
+      <KPICard label="إجمالي عدد الموظفين" value={fmtNum(employees.length)} icon={ClipboardList} />
+
+      {showForm && (
+        <form onSubmit={submit} className="no-print">
+          <SectionCard title={editingId ? "تعديل بيانات موظف" : "إضافة موظف جديد"}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="الاسم" required><TextInput value={form.name} onChange={set("name")} required placeholder="اسم الموظف" /></Field>
+              <Field label="الوظيفة" required><TextInput value={form.jobTitle} onChange={set("jobTitle")} required placeholder="مثال: مشرف صيانة" /></Field>
+              <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مثال: الورشة" /></Field>
+              <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
+            </div>
+            <div className="flex justify-end gap-2 mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ"}</button>
+            </div>
+          </SectionCard>
+        </form>
+      )}
+
+      <div className="no-print relative">
+        <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو الوظيفة أو الموقع..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+      </div>
+
+      <div id="print-area">
+        {filtered.length === 0 ? (
+          <SectionCard><EmptyState icon={ClipboardList} title="لا يوجد موظفين مسجّلين بعد" /></SectionCard>
+        ) : (
+          <SectionCard title={`الموظفين (${filtered.length})`}>
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["الاسم", "الوظيفة", "موقع العمل", "ملاحظات", ""].map((h) => (
+                      <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((emp) => (
+                    <tr key={emp.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
+                      <td className="px-4 py-2.5">{emp.notes || "—"}</td>
+                      <td className="px-4 py-2.5 no-print">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => startEdit(emp)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                          <button onClick={() => onDelete(emp.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ============================================================
