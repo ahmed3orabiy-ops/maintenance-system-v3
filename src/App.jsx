@@ -226,12 +226,22 @@ function useStorage(key, initial, shared = true) {
 /* ============================================================
    عناصر واجهة صغيرة
 ============================================================ */
-function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
+const KPI_ACCENTS = {
+  blue: { bg: "#DBEAFE", fg: "#2563EB" },
+  amber: { bg: "#FEF3C7", fg: "#D97706" },
+  green: { bg: "#D1FAE5", fg: "#059669" },
+  red: { bg: "#FEE2E2", fg: "#DC2626" },
+  purple: { bg: "#EDE9FE", fg: "#7C3AED" },
+  teal: { bg: "#CCFBF1", fg: "#0D9488" },
+};
+
+function KPICard({ label, value, sub, tone = "navy", icon: Icon, accent }) {
   const isGold = tone === "gold";
   const bg = isGold ? `linear-gradient(165deg, ${COLORS.paper}, ${COLORS.cream})` : `linear-gradient(155deg, ${COLORS.navy}, ${COLORS.navyDeep})`;
   const textColor = isGold ? COLORS.ink : "white";
   const labelColor = isGold ? COLORS.slate : "rgba(255,255,255,0.62)";
   const subColor = isGold ? COLORS.slateLight : "rgba(255,255,255,0.55)";
+  const iconColors = accent && KPI_ACCENTS[accent] ? KPI_ACCENTS[accent] : (isGold ? { bg: `${COLORS.goldSoft}45`, fg: COLORS.gold } : { bg: "rgba(255,255,255,0.10)", fg: "rgba(255,255,255,0.9)" });
   return (
     <div
       style={{
@@ -249,19 +259,21 @@ function KPICard({ label, value, sub, tone = "navy", icon: Icon }) {
           <div className="absolute -left-3 -bottom-10 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,0.03)" }} />
         </>
       )}
-      <div className="relative flex items-center justify-between mb-3.5">
-        <span className="text-[11px] font-bold tracking-wide" style={{ color: labelColor, letterSpacing: "0.01em" }}>{label}</span>
+      <div className="relative flex items-center gap-3">
         {Icon && (
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: isGold ? `${COLORS.goldSoft}35` : "rgba(255,255,255,0.10)", border: isGold ? `1px solid ${COLORS.gold}66` : "1px solid rgba(255,255,255,0.08)" }}
+            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: iconColors.bg }}
           >
-            <Icon size={15} style={{ color: isGold ? COLORS.gold : "rgba(255,255,255,0.9)" }} />
+            <Icon size={19} style={{ color: iconColors.fg }} />
           </div>
         )}
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold tracking-wide mb-1 truncate" style={{ color: labelColor, letterSpacing: "0.01em" }}>{label}</div>
+          <div className="text-[22px] leading-none font-extrabold tabular-nums" style={{ color: textColor, letterSpacing: "-0.01em" }}>{value}</div>
+        </div>
       </div>
-      <div className="relative text-[26px] leading-none font-extrabold tabular-nums" style={{ color: textColor, letterSpacing: "-0.01em" }}>{value}</div>
-      {sub && <div className="relative text-xs mt-2" style={{ color: subColor }}>{sub}</div>}
+      {sub && <div className="relative text-xs mt-3" style={{ color: subColor }}>{sub}</div>}
     </div>
   );
 }
@@ -338,6 +350,18 @@ function EmptyState({ icon: Icon, title, sub }) {
       </div>
       <div className="font-semibold text-sm" style={{ color: COLORS.ink }}>{title}</div>
       {sub && <div className="text-xs mt-1" style={{ color: COLORS.slateLight }}>{sub}</div>}
+    </div>
+  );
+}
+
+function PrintLetterhead() {
+  return (
+    <div className="flex items-center gap-3 mb-4 pb-3" style={{ borderBottom: "2px solid #B08D42" }}>
+      <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 44, objectFit: "contain" }} />
+      <div>
+        <div className="font-extrabold text-base" style={{ color: "#101A2E" }}>شركة الرابح للمقاولات والتوريدات</div>
+        <div className="text-xs" style={{ color: "#5B6579" }}>فرع الصيانة والتشغيل</div>
+      </div>
     </div>
   );
 }
@@ -895,31 +919,52 @@ export default function App() {
 
   const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded;
 
-  const NAV = [
-    { key: "home", label: "الصفحة الرئيسية", icon: Building2 },
-    { key: "dashboard", label: "تقرير تنفيذي", icon: LayoutDashboard },
-    { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
-    { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
-    { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
-    { key: "revenue", label: "الإيرادات", icon: Wallet },
-    { key: "custodies", label: "العهد", icon: ClipboardList },
-    { key: "subCustodies", label: "عهد فرعية (مشرفين)", icon: Wallet },
-    { key: "database", label: "قاعدة البيانات", icon: Database },
-    { key: "equipment", label: "بطاقة أداء المعدات", icon: Wrench },
-    { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
-    { key: "maintenanceLog", label: "سجل الصيانة", icon: ListChecks },
-    { key: "fuel", label: "السولار", icon: Fuel },
-    { key: "oils", label: "الزيوت والفلاتر", icon: Wrench },
-    { key: "fuelAnalysis", label: "تحليل السولار", icon: BarChart3 },
-    { key: "equipmentCodes", label: "أكواد المعدات", icon: ListChecks },
-    { key: "salaries", label: "المرتبات", icon: Wallet },
-    { key: "print", label: "طباعة عهدة", icon: Printer },
-    { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
-    { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
-    { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
-    { key: "employees", label: "الموظفين", icon: ClipboardList },
-    { key: "auditLog", label: "سجل التعديلات", icon: ListChecks },
+  const NAV_GROUPS = [
+    {
+      group: null,
+      items: [
+        { key: "home", label: "الصفحة الرئيسية", icon: Building2 },
+        { key: "dashboard", label: "تقرير تنفيذي", icon: LayoutDashboard },
+      ],
+    },
+    {
+      group: "المالية",
+      items: [
+        { key: "custodies", label: "العهد", icon: ClipboardList },
+        { key: "subCustodies", label: "عهد فرعية (مشرفين)", icon: Wallet },
+        { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
+        { key: "database", label: "قاعدة البيانات", icon: Database },
+        { key: "revenue", label: "الإيرادات", icon: Wallet },
+        { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
+        { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
+      ],
+    },
+    {
+      group: "المعدات",
+      items: [
+        { key: "equipment", label: "بطاقة أداء المعدات", icon: Wrench },
+        { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
+        { key: "maintenanceLog", label: "سجل الصيانة", icon: ListChecks },
+        { key: "fuel", label: "السولار", icon: Fuel },
+        { key: "oils", label: "الزيوت والفلاتر", icon: Wrench },
+        { key: "fuelAnalysis", label: "تحليل السولار", icon: BarChart3 },
+        { key: "equipmentCodes", label: "أكواد المعدات", icon: ListChecks },
+      ],
+    },
+    {
+      group: "الإدارة",
+      items: [
+        { key: "salaries", label: "المرتبات", icon: Wallet },
+        { key: "employees", label: "الموظفين", icon: ClipboardList },
+        { key: "print", label: "طباعة عهدة", icon: Printer },
+        { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
+        { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
+        { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
+        { key: "auditLog", label: "سجل التعديلات", icon: ListChecks },
+      ],
+    },
   ];
+  const NAV = NAV_GROUPS.flatMap((g) => g.items);
 
   if (authUser === undefined || (authUser && role === undefined)) {
     return (
@@ -1043,26 +1088,35 @@ export default function App() {
           </button>
         </div>
         <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {NAV.map((n) => {
-            const active = view === n.key;
-            return (
-              <button
-                key={n.key}
-                onClick={() => { setView(n.key); setSidebarOpen(false); }}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-all text-right"
-                style={{
-                  background: active ? `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.teal})` : "transparent",
-                  color: active ? COLORS.navyDeep : "rgba(255,255,255,0.68)",
-                  boxShadow: active ? "0 6px 16px -6px rgba(176,141,66,0.5)" : "none",
-                }}
-                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
-              >
-                <n.icon size={16} />
-                {n.label}
-              </button>
-            );
-          })}
+          {NAV_GROUPS.map((g, gi) => (
+            <div key={g.group || `top-${gi}`} className={gi > 0 ? "pt-3 mt-3 border-t border-white/10" : ""}>
+              {g.group && (
+                <div className="px-3.5 pb-1.5 text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)" }}>
+                  {g.group}
+                </div>
+              )}
+              {g.items.map((n) => {
+                const active = view === n.key;
+                return (
+                  <button
+                    key={n.key}
+                    onClick={() => { setView(n.key); setSidebarOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-all text-right"
+                    style={{
+                      background: active ? `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.teal})` : "transparent",
+                      color: active ? COLORS.navyDeep : "rgba(255,255,255,0.68)",
+                      boxShadow: active ? "0 6px 16px -6px rgba(176,141,66,0.5)" : "none",
+                    }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <n.icon size={16} />
+                    {n.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
         <div className="px-3 pb-3 space-y-2">
           <button
@@ -1180,6 +1234,23 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
   const salaryTotal = (salaries || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
   const grandTotal = custodyExpenseTotal + fuelTotal + oilTotal + salaryTotal;
 
+  const monthlyTrend = useMemo(() => {
+    const map = {};
+    expenses.forEach((e) => {
+      const m = (e.date || "").slice(0, 7);
+      if (!m) return;
+      if (!map[m]) map[m] = { month: m, "الإيرادات": 0, "المصروفات": 0 };
+      map[m]["المصروفات"] += (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+    });
+    (revenues || []).forEach((r) => {
+      const m = r.month || r.startMonth || "";
+      if (!m) return;
+      if (!map[m]) map[m] = { month: m, "الإيرادات": 0, "المصروفات": 0 };
+      map[m]["الإيرادات"] += Number(r.amount ?? r.total) || 0;
+    });
+    return Object.values(map).sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+  }, [expenses, revenues]);
+
   const CARDS = [
     { key: "dashboard", label: "تقرير تنفيذي", desc: "مؤشرات حية ورسوم بيانية شاملة", icon: LayoutDashboard, color: COLORS.navy },
     { key: "analysis", label: "تحليل المصروفات", desc: "المواقع، الاتجاه الزمني، ومقارنة العهد", icon: BarChart3, color: "#2E7A50" },
@@ -1238,11 +1309,25 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KPICard label="مصروفات من خلال العهد" value={fmtMoney(custodyExpenseTotal)} icon={Database} />
-        <KPICard label="مصروفات زيوت وفلاتر" value={fmtMoney(oilTotal)} tone="gold" icon={Wrench} />
-        <KPICard label="مرتبات" value={fmtMoney(salaryTotal)} icon={Wallet} />
-        <KPICard label="سولار" value={fmtMoney(fuelTotal)} tone="gold" icon={Fuel} />
+        <KPICard label="مصروفات من خلال العهد" value={fmtMoney(custodyExpenseTotal)} icon={Database} accent="blue" />
+        <KPICard label="مصروفات زيوت وفلاتر" value={fmtMoney(oilTotal)} tone="gold" icon={Wrench} accent="amber" />
+        <KPICard label="مرتبات" value={fmtMoney(salaryTotal)} icon={Wallet} accent="purple" />
+        <KPICard label="سولار" value={fmtMoney(fuelTotal)} tone="gold" icon={Fuel} accent="teal" />
       </div>
+
+      <SectionCard title="اتجاه الإيرادات والمصروفات الشهري">
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={monthlyTrend} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} />
+            <XAxis dataKey="month" tick={{ fontSize: 11, fill: COLORS.slate }} />
+            <YAxis tick={{ fontSize: 11, fill: COLORS.slate }} tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)} />
+            <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={{ fontSize: 12, borderRadius: 10, border: `1px solid ${COLORS.border}` }} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Line type="monotone" dataKey="الإيرادات" stroke={COLORS.gold} strokeWidth={2.5} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="المصروفات" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </SectionCard>
 
       <div>
         <h2 className="text-sm font-bold mb-4" style={{ color: COLORS.slate }}>الوصول السريع</h2>
@@ -1744,6 +1829,7 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
       )}
 
       <div className="print-only-area" id="print-area">
+        <PrintLetterhead />
         <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>كشف العهد</h2>
         <table>
           <thead><tr>{["العهدة", "الجهة", "الفترة", "متاح", "مصروف", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
@@ -1863,6 +1949,7 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
       </div>
 
       <div id="print-area">
+        <PrintLetterhead />
         <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
           <KPICard label="إجمالي الممنوح" value={fmtMoney(grand.given)} icon={Wallet} />
           <KPICard label="إجمالي المُصفّى" value={fmtMoney(grand.cleared)} tone="gold" icon={Wallet} />
@@ -2270,6 +2357,7 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
       </SectionCard>
 
       <div className="print-only-area" id="print-area">
+        <PrintLetterhead />
         <h2 style={{ fontFamily: "Cairo", textAlign: "center" }}>قاعدة البيانات</h2>
         <table>
           <thead>
@@ -2383,6 +2471,7 @@ function MaintenanceLogView({ expenses }) {
           </SectionCard>
 
           <div className="print-only-area" id="print-area">
+            <PrintLetterhead />
             <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>سجل صيانة {code}</h2>
             <table>
               <thead><tr>{["التاريخ", "التصنيف", "الغرض من الصرف", "الموقع", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
@@ -2668,6 +2757,7 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
       </div>
 
       <div id="print-area">
+        <PrintLetterhead />
       {records.length === 0 ? (
         <SectionCard><EmptyState icon={Fuel} title="لا توجد سجلات سولار بعد" /></SectionCard>
       ) : (
@@ -2996,6 +3086,7 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
       </SectionCard>
 
       <div className="print-only-area" id="print-area">
+        <PrintLetterhead />
         <h2 style={{ fontFamily: "Cairo", textAlign: "center" }}>سجل الزيوت والفلاتر</h2>
         <table>
           <thead><tr>{["التاريخ", "كود المعدة", "النوع", "الصنف", "الكمية", "سعر الوحدة", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
@@ -3395,6 +3486,7 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
       </div>
 
       <div id="print-area">
+        <PrintLetterhead />
         {SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
           const ownerCodes = codes.filter((c) => c.owner === owner);
           return (
@@ -3637,6 +3729,7 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
       />
 
       <div id="print-area">
+        <PrintLetterhead />
         <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
           <KPICard label="إجمالي المرتبات الكلي" value={fmtMoney(total)} icon={Wallet} />
           <KPICard label="مرتبات مباشرة (سائقين)" value={fmtMoney(totalDirect)} tone="gold" icon={Wallet} />
@@ -3985,6 +4078,7 @@ function ProfitabilityView({ expenses, revenues, fuelRecords, oilRecords, salari
       />
 
       <div id="print-area">
+        <PrintLetterhead />
       <div className="no-print grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <KPICard label="إجمالي الإيراد" value={fmtMoney(totals.revenue)} icon={TrendingUp} />
         <KPICard label="كارتات" value={fmtMoney(totals.cards)} tone="gold" icon={Wrench} />
@@ -4536,6 +4630,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
       </div>
 
       <div id="print-area">
+        <PrintLetterhead />
         {employees.length === 0 ? (
           <SectionCard><EmptyState icon={ClipboardList} title="لا يوجد موظفين مسجّلين بعد" /></SectionCard>
         ) : (
@@ -5314,6 +5409,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
       )}
 
       <div id="print-area">
+        <PrintLetterhead />
       {revenues.length === 0 ? (
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
       ) : (
