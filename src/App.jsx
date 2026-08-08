@@ -4272,7 +4272,8 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [q, setQ] = useState("");
-  const empty = { name: "", jobTitle: "", location: "", costCode: "", notes: "" };
+  const [printOwner, setPrintOwner] = useState("الكل");
+  const empty = { name: "", jobTitle: "", location: "", owner: SOURCES[0], costCode: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -4283,10 +4284,10 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
     return map;
   }, [equipmentCodes]);
 
-  const startAdd = () => { setEditingId(null); setForm(empty); setShowForm(true); };
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
   const startEdit = (emp) => {
     setEditingId(emp.id);
-    setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", costCode: emp.costCode || "", notes: emp.notes || "" });
+    setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", owner: emp.owner || SOURCES[0], costCode: emp.costCode || "", notes: emp.notes || "" });
     setShowForm(true);
   };
   const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
@@ -4299,13 +4300,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
   };
 
   const term = q.trim().toLowerCase();
-  const filtered = useMemo(
-    () =>
-      [...employees]
-        .filter((e) => !term || [e.name, e.jobTitle, e.location, e.costCode, e.notes].join(" ").toLowerCase().includes(term))
-        .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar")),
-    [employees, term]
-  );
+  const matches = (e) => !term || [e.name, e.jobTitle, e.location, e.costCode, e.notes].join(" ").toLowerCase().includes(term);
 
   const handlePrint = () => window.print();
 
@@ -4313,7 +4308,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
     <div className="space-y-6">
       <Header
         title="الموظفين"
-        sub="سجل بالموظفين، وظائفهم، ومواقع عملهم، وكود التكلفة اللي بيتحمّل عليه كل موظف"
+        sub="سجل بالموظفين، وظائفهم، ومواقع عملهم، وكود التكلفة اللي بيتحمّل عليه كل موظف — مقسّم حسب الشركة"
         action={
           <div className="no-print flex flex-wrap gap-2">
             <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
@@ -4334,6 +4329,9 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="الاسم" required><TextInput value={form.name} onChange={set("name")} required placeholder="اسم الموظف" /></Field>
               <Field label="الوظيفة" required><TextInput value={form.jobTitle} onChange={set("jobTitle")} required placeholder="مثال: مشرف صيانة" /></Field>
+              <Field label="الشركة" required>
+                <Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
+              </Field>
               <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مثال: الورشة" /></Field>
               <Field label="كود التكلفة">
                 <Select value={form.costCode} onChange={set("costCode")}>
@@ -4356,46 +4354,78 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete })
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو الوظيفة أو الموقع أو كود التكلفة..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
       </div>
 
+      <div className="no-print flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+        {["الكل", ...SOURCES].map((opt) => (
+          <button
+            key={opt}
+            onClick={() => setPrintOwner(opt)}
+            className="px-3 py-2 rounded-lg text-xs font-bold"
+            style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+
       <div id="print-area">
-        {filtered.length === 0 ? (
+        {employees.length === 0 ? (
           <SectionCard><EmptyState icon={ClipboardList} title="لا يوجد موظفين مسجّلين بعد" /></SectionCard>
         ) : (
-          <SectionCard title={`الموظفين (${filtered.length})`}>
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
-                      <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((emp) => (
-                    <tr key={emp.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">
-                        {emp.costCode ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>
-                            {emp.costCode}{costCodeMap[emp.costCode]?.type === "مجمع تكلفة" ? " (مجمع تكلفة)" : ""}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td className="px-4 py-2.5">{emp.notes || "—"}</td>
-                      <td className="px-4 py-2.5 no-print">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => startEdit(emp)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                          <button onClick={() => onDelete(emp.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
+          SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
+            const list = employees.filter((e) => (e.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar"));
+            return (
+              <SectionCard
+                key={owner}
+                className={idx > 0 ? "print-page-break" : ""}
+                title={`موظفين ${owner} (${list.length})`}
+                action={
+                  <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                    <Plus size={13} className="inline -mt-0.5" /> إضافة لموظفين {owner}
+                  </button>
+                }
+              >
+                {list.length === 0 ? (
+                  <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا يوجد موظفين مسجّلين لـ {owner}</div>
+                ) : (
+                  <div className="overflow-x-auto -mx-5">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                          {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
+                            <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map((emp) => (
+                          <tr key={emp.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                            <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
+                            <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
+                            <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
+                            <td className="px-4 py-2.5 whitespace-nowrap">
+                              {emp.costCode ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>
+                                  {emp.costCode}{costCodeMap[emp.costCode]?.type === "مجمع تكلفة" ? " (مجمع تكلفة)" : ""}
+                                </span>
+                              ) : "—"}
+                            </td>
+                            <td className="px-4 py-2.5">{emp.notes || "—"}</td>
+                            <td className="px-4 py-2.5 no-print">
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => startEdit(emp)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                                <button onClick={() => onDelete(emp.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            );
+          })
         )}
       </div>
     </div>
