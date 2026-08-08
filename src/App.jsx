@@ -1094,7 +1094,7 @@ export default function App() {
             {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
             {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
             {view === "maintenanceLog" && <MaintenanceLogView expenses={expenses} />}
-            {view === "fuel" && <FuelView records={fuelRecords} onAdd={addFuelRecord} onDelete={deleteFuelRecord} onImport={bulkImportFuel} />}
+            {view === "fuel" && <FuelView records={fuelRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addFuelRecord} onDelete={deleteFuelRecord} onImport={bulkImportFuel} />}
             {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} />}
@@ -2336,34 +2336,50 @@ function MaintenanceLogView({ expenses }) {
 /* ============================================================
    السولار - سجل تفصيلي + استيراد/تصدير/طباعة
 ============================================================ */
-function FuelView({ records, onAdd, onDelete, onImport }) {
+function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport }) {
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [q, setQ] = useState("");
   const fileRef = useRef(null);
-  const printRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState("append");
+  const [feeOverridden, setFeeOverridden] = useState(false);
+
+  const ownerByCode = useMemo(() => {
+    const map = {};
+    equipmentCodes.forEach((c) => { if (c.owner) map[normCode(c.code)] = c.owner; });
+    expenses.forEach((e) => { const nc = normCode(e.equipmentCode); if (nc && e.source && !map[nc]) map[nc] = e.source; });
+    return map;
+  }, [equipmentCodes, expenses]);
 
   const empty = { date: todayISO(), time: "", code: "", vehicleType: "", driverName: "", station: "", fuelType: "", odometerStart: "", odometerEnd: "", quantity: "", pricePerLiter: "", commission: "", tax: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  // العمولة = 1% من (الكمية × السعر)، والضريبة = 14% من العمولة — نفس نسب أوكتين، بيتحسبوا تلقائيًا لحد ما تعدّلهم بنفسك
+  const subtotalPreview = (Number(form.quantity) || 0) * (Number(form.pricePerLiter) || 0);
+  useEffect(() => {
+    if (feeOverridden) return;
+    const autoCommission = subtotalPreview * 0.01;
+    const autoTax = autoCommission * 0.14;
+    setForm((f) => ({ ...f, commission: autoCommission ? autoCommission.toFixed(2) : "", tax: autoTax ? autoTax.toFixed(2) : "" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.quantity, form.pricePerLiter]);
+
+  const setFeeManually = (k) => (e) => { setFeeOverridden(true); setForm((f) => ({ ...f, [k]: e.target.value })); };
+
   const distancePreview = (Number(form.odometerEnd) || 0) - (Number(form.odometerStart) || 0);
-  const totalPreview = (Number(form.quantity) || 0) * (Number(form.pricePerLiter) || 0) + (Number(form.commission) || 0) + (Number(form.tax) || 0);
+  const totalPreview = subtotalPreview + (Number(form.commission) || 0) + (Number(form.tax) || 0);
 
   const submit = (e) => {
     e.preventDefault();
     onAdd(form);
     setForm({ ...empty, date: form.date, code: "", vehicleType: "" });
+    setFeeOverridden(false);
   };
 
-  const rows = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return [...records]
-      .filter((r) => !term || [r.code, r.vehicleType, r.driverName, r.station, r.notes].join(" ").toLowerCase().includes(term))
-      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  }, [records, q]);
+  const term = q.trim().toLowerCase();
+  const matches = (r) => !term || [r.code, r.vehicleType, r.driverName, r.station, r.notes].join(" ").toLowerCase().includes(term);
 
   const totalCost = records.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const totalQty = records.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
@@ -2400,7 +2416,7 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
       const idxQty = colIndex(["كمية الوقود", "الكمية", "الكمية (لتر)", "كمية", "لتر"]);
       const idxCommission = colIndex(["العمولة"]);
       const idxTax = colIndex(["الضريبة"]);
-      // "المبلغ الكلي" هو الإجمالي الفعلي بعد إضافة العمولة والضريبة، أما "الإجمالي" فهو غالبًا سعر × كمية بس (قبل الرسوم)
+      // "المبلغ الكلي" هو الإجمالي الفعلي بعد إضافة العمولة (1%) والضريبة (14% من العمولة)، أما "الإجمالي" فهو سعر × كمية بس (قبل الرسوم)
       const idxTotal = colIndex(["المبلغ الكلي", "الإجمالي"]);
       const idxOdoStart = colIndex(["قراءة العداد أول الفترة"]);
       const idxOdoEnd = colIndex(["عداد الكيلومترات", "قراءة العداد آخر الفترة"]);
@@ -2473,17 +2489,15 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
     XLSX.writeFile(wb, `سجل_السولار_${todayISO()}.xlsx`);
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
 
   return (
     <div className="space-y-6">
       <Header
         title="السولار"
-        sub="سجل تفصيلي لاستهلاك السولار لكل معدة"
+        sub="سجل تفصيلي لاستهلاك السولار لكل معدة، مقسّم حسب مالك المعدة"
         action={
-          <div className="flex flex-wrap gap-2">
+          <div className="no-print flex flex-wrap gap-2">
             <button onClick={() => { setShowForm((s) => !s); setShowImport(false); }} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
               {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "سجل جديد"}
             </button>
@@ -2500,7 +2514,7 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-4">
         <KPICard label="إجمالي تكلفة السولار" value={fmtMoney(totalCost)} icon={Fuel} />
         <KPICard label="إجمالي الكمية (لتر)" value={fmtNum(totalQty.toFixed(0))} tone="gold" icon={Fuel} />
         <KPICard label="إجمالي المسافة (كم)" value={fmtNum(totalDist.toFixed(0))} icon={TrendingUp} />
@@ -2508,7 +2522,7 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
       </div>
 
       {showForm && (
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="no-print">
           <SectionCard title="سجل سولار جديد">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
@@ -2522,8 +2536,8 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
               <Field label="قراءة العداد آخر الفترة"><TextInput type="number" value={form.odometerEnd} onChange={set("odometerEnd")} placeholder="0" /></Field>
               <Field label="الكمية (لتر)" required><TextInput type="number" step="0.01" value={form.quantity} onChange={set("quantity")} required placeholder="0" /></Field>
               <Field label="سعر اللتر" required><TextInput type="number" step="0.01" value={form.pricePerLiter} onChange={set("pricePerLiter")} required placeholder="0" /></Field>
-              <Field label="العمولة"><TextInput type="number" step="0.01" value={form.commission} onChange={set("commission")} placeholder="0" /></Field>
-              <Field label="الضريبة"><TextInput type="number" step="0.01" value={form.tax} onChange={set("tax")} placeholder="0" /></Field>
+              <Field label="العمولة (تلقائي 1%)"><TextInput type="number" step="0.01" value={form.commission} onChange={setFeeManually("commission")} placeholder="0" /></Field>
+              <Field label="الضريبة (تلقائي 14% من العمولة)"><TextInput type="number" step="0.01" value={form.tax} onChange={setFeeManually("tax")} placeholder="0" /></Field>
               <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
             </div>
             <div className="flex items-center justify-between mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
@@ -2537,7 +2551,7 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
       )}
 
       {showImport && (
-        <SectionCard title="استيراد من إكسل">
+        <SectionCard title="استيراد من إكسل" className="no-print">
           <div
             className="border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-50"
             style={{ borderColor: COLORS.border }}
@@ -2560,62 +2574,69 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
         </SectionCard>
       )}
 
+      <div className="no-print relative">
+        <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
+        <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو النوع..." className="pr-9" />
+      </div>
+
+      <div id="print-area">
       {records.length === 0 ? (
         <SectionCard><EmptyState icon={Fuel} title="لا توجد سجلات سولار بعد" /></SectionCard>
       ) : (
-        <SectionCard title={`السجل (${rows.length})`}>
-          <div className="relative mb-4">
-            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
-            <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو النوع..." className="pr-9" />
-          </div>
-          <div className="overflow-x-auto -mx-5">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                  {["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "الإجمالي", "معدل الاستهلاك", ""].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                    <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.date}</td>
-                    <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{r.code}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">{r.vehicleType || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.driverName || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.station || "—"}</td>
-                    <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.distance)}</td>
-                    <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.quantity)}</td>
-                    <td className="px-3 py-2.5 tabular-nums font-bold">{fmtMoney(r.total)}</td>
-                    <td className="px-3 py-2.5 tabular-nums">{(Number(r.rate) || 0).toFixed(2)}</td>
-                    <td className="px-3 py-2.5"><button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
+        SOURCES.map((owner) => {
+          const list = [...records]
+            .filter((r) => (ownerByCode[normCode(r.code)] || SOURCES[0]) === owner)
+            .filter(matches)
+            .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+          const ownerCost = list.reduce((s, r) => s + (Number(r.total) || 0), 0);
+          const ownerQty = list.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+          return (
+            <SectionCard key={owner} title={`سولار معدات ${owner} (${list.length}) — ${fmtMoney(ownerCost)}`}>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
+                  <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>إجمالي التكلفة</div>
+                  <div className="font-extrabold tabular-nums text-sm" style={{ color: "#FFFFFF" }}>{fmtMoney(ownerCost)}</div>
+                </div>
+                <div className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
+                  <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>إجمالي الكمية (لتر)</div>
+                  <div className="font-extrabold tabular-nums text-sm" style={{ color: "#FFFFFF" }}>{fmtNum(ownerQty.toFixed(0))}</div>
+                </div>
+              </div>
+              {list.length === 0 ? (
+                <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد سجلات مطابقة</div>
+              ) : (
+                <div className="overflow-x-auto -mx-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                        {["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "الإجمالي", "معدل الاستهلاك", ""].map((h) => (
+                          <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map((r) => (
+                        <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                          <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.date}</td>
+                          <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{r.code}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{r.vehicleType || "—"}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.driverName || "—"}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.station || "—"}</td>
+                          <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.distance)}</td>
+                          <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.quantity)}</td>
+                          <td className="px-3 py-2.5 tabular-nums font-bold">{fmtMoney(r.total)}</td>
+                          <td className="px-3 py-2.5 tabular-nums">{(Number(r.rate) || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2.5 no-print"><button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SectionCard>
+          );
+        })
       )}
-
-      <div className="print-only-area" id="print-area">
-        <div ref={printRef}>
-          <h2 style={{ fontFamily: "Cairo", textAlign: "center" }}>سجل استهلاك السولار</h2>
-          <table>
-            <thead><tr>{["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "الإجمالي", "معدل الاستهلاك"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.date}</td><td>{r.code}</td><td>{r.vehicleType}</td>
-                  <td>{r.driverName || ""}</td><td>{r.station || ""}</td>
-                  <td>{fmtNum(r.distance)}</td><td>{fmtNum(r.quantity)}</td>
-                  <td>{fmtMoney(r.total)}</td><td>{(Number(r.rate) || 0).toFixed(2)}</td>
-                </tr>
-              ))}
-              <tr><td colSpan={6}><b>الإجمالي</b></td><td><b>{fmtNum(totalQty.toFixed(0))}</b></td><td><b>{fmtMoney(totalCost)}</b></td><td><b>{avgRate.toFixed(2)}</b></td></tr>
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   );
