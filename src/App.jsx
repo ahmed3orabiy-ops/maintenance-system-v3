@@ -975,6 +975,7 @@ export default function App() {
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
+          .print-page-break { page-break-before: always; break-before: page; }
           #print-area table.profit-table { font-size: 7px; }
           #print-area table.profit-table th, #print-area table.profit-table td { padding: 2px 3px !important; word-break: normal; overflow-wrap: break-word; line-height: 1.25; }
           #print-area table.profit-table th:first-child,
@@ -1127,7 +1128,7 @@ export default function App() {
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} />}
-            {view === "employees" && <EmployeesView employees={employees} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} />}
+            {view === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} />}
             {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
         )}
@@ -2622,7 +2623,7 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
       {records.length === 0 ? (
         <SectionCard><EmptyState icon={Fuel} title="لا توجد سجلات سولار بعد" /></SectionCard>
       ) : (
-        SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner) => {
+        SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
           const list = [...records]
             .filter((r) => (ownerByCode[normCode(r.code)] || SOURCES[0]) === owner)
             .filter(matches)
@@ -2630,7 +2631,7 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
           const ownerCost = list.reduce((s, r) => s + (Number(r.total) || 0), 0);
           const ownerQty = list.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
           return (
-            <SectionCard key={owner} title={`سولار معدات ${owner} (${list.length}) — ${fmtMoney(ownerCost)}`}>
+            <SectionCard key={owner} className={idx > 0 ? "print-page-break" : ""} title={`سولار معدات ${owner} (${list.length}) — ${fmtMoney(ownerCost)}`}>
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <div className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
                   <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>إجمالي التكلفة</div>
@@ -3336,10 +3337,10 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
       </div>
 
       <div id="print-area">
-        {SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner) => {
+        {SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
           const ownerCodes = codes.filter((c) => c.owner === owner);
           return (
-            <SectionCard key={owner} title={`أكواد معدات ${owner} (${ownerCodes.length})`}>
+            <SectionCard key={owner} className={idx > 0 ? "print-page-break" : ""} title={`أكواد معدات ${owner} (${ownerCodes.length})`}>
               {ownerCodes.length === 0 ? (
                 <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد أكواد مسجلة لـ {owner}</div>
               ) : (
@@ -4267,18 +4268,25 @@ function toISODate(val) {
 /* ============================================================
    الموظفين
 ============================================================ */
-function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
+function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [q, setQ] = useState("");
-  const empty = { name: "", jobTitle: "", location: "", notes: "" };
+  const empty = { name: "", jobTitle: "", location: "", costCode: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const codeLabel = (c) => (c.type === "مجمع تكلفة" ? `${c.code} — مجمع تكلفة (${c.owner})` : `${c.code} — ${c.type || "معدة"} (${c.owner})`);
+  const costCodeMap = useMemo(() => {
+    const map = {};
+    equipmentCodes.forEach((c) => { map[c.code] = c; });
+    return map;
+  }, [equipmentCodes]);
 
   const startAdd = () => { setEditingId(null); setForm(empty); setShowForm(true); };
   const startEdit = (emp) => {
     setEditingId(emp.id);
-    setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", notes: emp.notes || "" });
+    setForm({ name: emp.name || "", jobTitle: emp.jobTitle || "", location: emp.location || "", costCode: emp.costCode || "", notes: emp.notes || "" });
     setShowForm(true);
   };
   const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
@@ -4294,7 +4302,7 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
   const filtered = useMemo(
     () =>
       [...employees]
-        .filter((e) => !term || [e.name, e.jobTitle, e.location, e.notes].join(" ").toLowerCase().includes(term))
+        .filter((e) => !term || [e.name, e.jobTitle, e.location, e.costCode, e.notes].join(" ").toLowerCase().includes(term))
         .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ar")),
     [employees, term]
   );
@@ -4305,7 +4313,7 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
     <div className="space-y-6">
       <Header
         title="الموظفين"
-        sub="سجل بالموظفين، وظائفهم، ومواقع عملهم"
+        sub="سجل بالموظفين، وظائفهم، ومواقع عملهم، وكود التكلفة اللي بيتحمّل عليه كل موظف"
         action={
           <div className="no-print flex flex-wrap gap-2">
             <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
@@ -4327,6 +4335,12 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
               <Field label="الاسم" required><TextInput value={form.name} onChange={set("name")} required placeholder="اسم الموظف" /></Field>
               <Field label="الوظيفة" required><TextInput value={form.jobTitle} onChange={set("jobTitle")} required placeholder="مثال: مشرف صيانة" /></Field>
               <Field label="موقع العمل"><TextInput value={form.location} onChange={set("location")} placeholder="مثال: الورشة" /></Field>
+              <Field label="كود التكلفة">
+                <Select value={form.costCode} onChange={set("costCode")}>
+                  <option value="">بدون تحديد</option>
+                  {equipmentCodes.map((c) => <option key={c.id} value={c.code}>{codeLabel(c)}</option>)}
+                </Select>
+              </Field>
               <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
             </div>
             <div className="flex justify-end gap-2 mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
@@ -4339,7 +4353,7 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
 
       <div className="no-print relative">
         <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو الوظيفة أو الموقع..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو الوظيفة أو الموقع أو كود التكلفة..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
       </div>
 
       <div id="print-area">
@@ -4351,7 +4365,7 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["الاسم", "الوظيفة", "موقع العمل", "ملاحظات", ""].map((h) => (
+                    {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
                       <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                     ))}
                   </tr>
@@ -4362,6 +4376,13 @@ function EmployeesView({ employees, onAdd, onUpdate, onDelete }) {
                       <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {emp.costCode ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: COLORS.cream, color: COLORS.slate }}>
+                            {emp.costCode}{costCodeMap[emp.costCode]?.type === "مجمع تكلفة" ? " (مجمع تكلفة)" : ""}
+                          </span>
+                        ) : "—"}
+                      </td>
                       <td className="px-4 py-2.5">{emp.notes || "—"}</td>
                       <td className="px-4 py-2.5 no-print">
                         <div className="flex items-center gap-1">
@@ -4941,6 +4962,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
   const [monthFrom, setMonthFrom] = useState("");
   const [monthTo, setMonthTo] = useState("");
   const [sourceFilter, setSourceFilter] = useState({}); // { [owner]: "الكل" | مصدر معين }
+  const [printOwner, setPrintOwner] = useState("الكل");
   const empty = { owner: SOURCES[0], source: SOURCES[0], month: todayISO().slice(0, 7), equipmentCode: "", equipmentType: "", location: "", amount: "", description: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -5039,6 +5061,20 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         <TextInput type="month" value={monthTo} onChange={(e) => setMonthTo(e.target.value)} placeholder="إلى شهر" title="إلى شهر" />
       </div>
 
+      <div className="no-print flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+        {["الكل", ...SOURCES].map((opt) => (
+          <button
+            key={opt}
+            onClick={() => setPrintOwner(opt)}
+            className="px-3 py-2 rounded-lg text-xs font-bold"
+            style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+
       {showForm && (
         <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
           <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
@@ -5085,7 +5121,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
       ) : (
         <>
-        {SOURCES.map((owner) => {
+        {SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
           const ownerList = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches);
           const activeSourceFilter = sourceFilter[owner] || "الكل";
           const list = ownerList
@@ -5100,6 +5136,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
           return (
             <SectionCard
               key={owner}
+              className={idx > 0 ? "print-page-break" : ""}
               title={`معدات ${owner} (${list.length}) — ${fmtMoney(ownerTotal)}`}
               action={
                 <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
