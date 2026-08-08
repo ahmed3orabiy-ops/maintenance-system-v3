@@ -1631,8 +1631,12 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
       />
 
       {showForm && (
-        <form onSubmit={submit}>
-          <SectionCard title={editingId ? "تعديل بيانات العهدة" : "بيانات العهدة الجديدة"}>
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بيانات العهدة" : "بيانات العهدة الجديدة"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="الجهة" required>
                 <Select value={form.source} onChange={handleSourceChange}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select>
@@ -1655,13 +1659,14 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
                 <TextInput type="number" step="0.01" value={form.transfersIn} onChange={set("transfersIn")} placeholder="0" />
               </Field>
             </div>
-            <div className="flex justify-end mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>
                 {editingId ? "حفظ التعديلات" : "حفظ العهدة"}
               </button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       {custodies.length === 0 ? (
@@ -1873,20 +1878,24 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
             </div>
 
             {showForm && (
-              <form onSubmit={submitSub} className="no-print mt-4">
-                <SectionCard title={editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}>
+              <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+                <form onSubmit={submitSub} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}</h3>
+                    <button type="button" onClick={cancelForm} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Field label="اسم المشرف" required><TextInput value={form.supervisorName} onChange={set("supervisorName")} required placeholder="اسم مشرف الصيانة" /></Field>
                     <Field label="تاريخ المنح" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
                     <Field label="المبلغ الممنوح" required><TextInput type="number" step="0.01" value={form.amountGiven} onChange={set("amountGiven")} required placeholder="0" /></Field>
                     <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
                   </div>
-                  <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                    <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+                  <div className="flex justify-end gap-2 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                    <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
                     <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
                   </div>
-                </SectionCard>
-              </form>
+                </form>
+              </div>
             )}
 
             {subCustodies.length === 0 ? (
@@ -1964,21 +1973,40 @@ function SubCustodiesView({ subCustodies, clearances, totals, onAddSub, onUpdate
                   <KPICard label="المتبقي" value={fmtMoney(selectedTotals.remaining)} tone="gold" icon={Wallet} />
                 </div>
 
-                <form onSubmit={submitClearance} className="no-print">
-                  <SectionCard title={editingClearanceId ? "تعديل بند تصفية" : `تسجيل بند تصفية جديد — ${selectedCustody.supervisorName}`}>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
-                      <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
-                      <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
-                    </div>
-                    <div className="flex justify-end gap-2 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                      {editingClearanceId && (
-                        <button type="button" onClick={cancelClearanceForm} className="px-4 py-2 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
-                      )}
-                      <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingClearanceId ? "حفظ التعديل" : "إضافة بند التصفية"}</button>
-                    </div>
-                  </SectionCard>
-                </form>
+                {!editingClearanceId && (
+                  <form onSubmit={submitClearance} className="no-print">
+                    <SectionCard title={`تسجيل بند تصفية جديد — ${selectedCustody.supervisorName}`}>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
+                        <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
+                        <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                        <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>إضافة بند التصفية</button>
+                      </div>
+                    </SectionCard>
+                  </form>
+                )}
+
+                {editingClearanceId && (
+                  <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+                    <form onSubmit={submitClearance} className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>تعديل بند تصفية</h3>
+                        <button type="button" onClick={cancelClearanceForm} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required />
+                        <TextInput type="number" step="0.01" value={clearanceForm.amount} onChange={csetC("amount")} required placeholder="المبلغ" />
+                        <TextInput value={clearanceForm.description} onChange={csetC("description")} required placeholder="فيم صُرف؟" className="md:col-span-2" />
+                      </div>
+                      <div className="flex justify-end gap-2 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                        <button type="button" onClick={cancelClearanceForm} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+                        <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ التعديل</button>
+                      </div>
+                    </form>
+                  </div>
+                )}
 
                 <SectionCard title={`بنود التصفية (${selectedItems.length})`}>
                   {selectedItems.length === 0 ? (
@@ -2565,8 +2593,12 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
       </div>
 
       {showForm && (
-        <form onSubmit={submit} className="no-print">
-          <SectionCard title="سجل سولار جديد">
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>سجل سولار جديد</h3>
+              <button type="button" onClick={() => setShowForm(false)} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
               <Field label="الوقت"><TextInput value={form.time} onChange={set("time")} placeholder="مثال: 7:49 م" /></Field>
@@ -2589,8 +2621,8 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
               </div>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ السجل</button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       {showImport && (
@@ -2889,8 +2921,12 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
       )}
 
       {showForm && (
-        <form onSubmit={submit}>
-          <SectionCard title="سجل زيوت وفلاتر جديد">
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>سجل زيوت وفلاتر جديد</h3>
+              <button type="button" onClick={() => setShowForm(false)} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
               <Field label="كود المعدة" required>
@@ -2917,8 +2953,8 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
               </div>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ السجل</button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       <SectionCard>
@@ -3266,8 +3302,12 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
       )}
 
       {showForm && (
-        <form onSubmit={submit}>
-          <SectionCard title={editingId ? "تعديل كود المعدة" : "كود معدة جديد"}>
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل كود المعدة" : "كود معدة جديد"}</h3>
+              <button type="button" onClick={() => setShowForm(false)} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="كود المعدة" required><TextInput value={form.code} onChange={set("code")} required placeholder="مثال: EX-200-32" /></Field>
               <Field label="النوع"><TextInput value={form.type} onChange={set("type")} placeholder="مثال: حفار" /></Field>
@@ -3275,13 +3315,14 @@ function EquipmentCodesView({ codes, expenses, fuelRecords, oilRecords, revenues
               <Field label="المالك" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
               <Field label="الموقع"><TextInput value={form.location} onChange={set("location")} placeholder="مثال: الورشة" /></Field>
             </div>
-            <div className="flex justify-end mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+              <button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>
                 {editingId ? "حفظ التعديلات" : "حفظ الكود"}
               </button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       <SectionCard title="مجمعات التكلفة (Cost Pool)">
@@ -3624,8 +3665,12 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
         </div>
 
         {showForm && (
-          <form onSubmit={submit} className="no-print mt-6">
-            <SectionCard title={editingId ? "تعديل بند مرتبات" : "بند مرتبات جديد"}>
+          <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+            <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند مرتبات" : "بند مرتبات جديد"}</h3>
+                <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Field label="الشهر" required><TextInput type="month" value={form.month} onChange={set("month")} required /></Field>
                 <Field label="الجهة" required><Select value={form.source} onChange={set("source")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
@@ -3646,12 +3691,12 @@ function SalariesView({ salaries, equipmentCodes, onAdd, onUpdate, onDelete }) {
                 )}
                 <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
               </div>
-              <div className="flex justify-end gap-2 mt-5 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                <button type="button" onClick={cancel} className="px-6 py-2.5 rounded-lg text-sm font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>إلغاء</button>
+              <div className="flex justify-end gap-2 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                <button type="button" onClick={cancel} className="px-6 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
                 <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
               </div>
-            </SectionCard>
-          </form>
+            </form>
+          </div>
         )}
 
         {salaries.length === 0 ? (
@@ -4442,8 +4487,12 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
       )}
 
       {showForm && (
-        <form onSubmit={submit} className="no-print">
-          <SectionCard title={editingId ? "تعديل بيانات موظف" : "إضافة موظف جديد"}>
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بيانات موظف" : "إضافة موظف جديد"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="الاسم" required><TextInput value={form.name} onChange={set("name")} required placeholder="اسم الموظف" /></Field>
               <Field label="الوظيفة" required><TextInput value={form.jobTitle} onChange={set("jobTitle")} required placeholder="مثال: مشرف صيانة" /></Field>
@@ -4459,12 +4508,12 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
               </Field>
               <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
             </div>
-            <div className="flex justify-end gap-2 mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
               <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
               <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ"}</button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       <div className="no-print relative">
@@ -4511,7 +4560,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
                       <thead>
                         <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                           {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
-                            <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)", minWidth: h === "كود التكلفة" ? 200 : undefined }}>{h}</th>
+                            <th key={h} className={`px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)", maxWidth: h === "الوظيفة" ? 90 : h === "ملاحظات" ? 110 : undefined }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -4519,16 +4568,16 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
                         {list.map((emp) => (
                           <tr key={emp.id} className="border-t" style={{ borderColor: COLORS.border }}>
                             <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{emp.name}</td>
-                            <td className="px-4 py-2.5 whitespace-nowrap">{emp.jobTitle}</td>
+                            <td className="px-3 py-2.5 text-xs" style={{ maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis" }} title={emp.jobTitle || ""}>{emp.jobTitle}</td>
                             <td className="px-4 py-2.5 whitespace-nowrap">{emp.location || "—"}</td>
-                            <td className="px-4 py-2.5" style={{ minWidth: 200 }}>
+                            <td className="px-4 py-2.5 whitespace-nowrap">
                               {emp.costCode ? (
-                                <span className="inline-block px-2 py-1 rounded text-[10px] font-bold whitespace-normal" style={{ background: COLORS.cream, color: COLORS.slate }}>
+                                <span className="inline-block px-2 py-1 rounded text-[10px] font-bold whitespace-nowrap" style={{ background: COLORS.cream, color: COLORS.slate }}>
                                   {emp.costCode}{costCodeMap[emp.costCode]?.type === "مجمع تكلفة" ? " (مجمع تكلفة)" : ""}
                                 </span>
                               ) : "—"}
                             </td>
-                            <td className="px-4 py-2.5">{emp.notes || "—"}</td>
+                            <td className="px-3 py-2.5 text-xs" style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis" }} title={emp.notes || ""}>{emp.notes || "—"}</td>
                             <td className="px-4 py-2.5 no-print">
                               <div className="flex items-center gap-1">
                                 <button onClick={() => startEdit(emp)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
