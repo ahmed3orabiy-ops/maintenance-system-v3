@@ -2397,10 +2397,11 @@ function FuelView({ records, onAdd, onDelete, onImport }) {
       const idxDriverName = colIndex(["إسم السائق", "اسم السائق"]);
       const idxStation = colIndex(["المحطة"]);
       const idxFuelType = colIndex(["نوع الوقود"]);
-      const idxQty = colIndex(["الكمية", "الكمية (لتر)", "كمية", "لتر"]);
+      const idxQty = colIndex(["كمية الوقود", "الكمية", "الكمية (لتر)", "كمية", "لتر"]);
       const idxCommission = colIndex(["العمولة"]);
       const idxTax = colIndex(["الضريبة"]);
-      const idxTotal = colIndex(["الإجمالي"]);
+      // "المبلغ الكلي" هو الإجمالي الفعلي بعد إضافة العمولة والضريبة، أما "الإجمالي" فهو غالبًا سعر × كمية بس (قبل الرسوم)
+      const idxTotal = colIndex(["المبلغ الكلي", "الإجمالي"]);
       const idxOdoStart = colIndex(["قراءة العداد أول الفترة"]);
       const idxOdoEnd = colIndex(["عداد الكيلومترات", "قراءة العداد آخر الفترة"]);
       const idxDistance = colIndex(["المسافه", "المسافة"]);
@@ -4822,8 +4823,12 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
       </div>
 
       {showForm && (
-        <form onSubmit={submit} className="no-print">
-          <SectionCard title={editingId ? "تعديل بند إيراد" : "بند إيراد جديد"}>
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند إيراد" : "بند إيراد جديد"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="كود المعدة" required>
                 <TextInput list="rev-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
@@ -4850,13 +4855,12 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
               <Field label="البيان"><TextInput value={form.description} onChange={set("description")} placeholder="مثال: إيجار شهري" /></Field>
               <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
             </div>
-            <div className="flex justify-end mt-6 pt-5 border-t" style={{ borderColor: COLORS.border }}>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
-                <Plus size={17} /> {editingId ? "حفظ التعديل" : "حفظ بند الإيراد"}
-              </button>
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ بند الإيراد"}</button>
             </div>
-          </SectionCard>
-        </form>
+          </form>
+        </div>
       )}
 
       <div id="print-area">
@@ -4864,7 +4868,6 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
         <SectionCard><EmptyState icon={TrendingUp} title="لا توجد إيرادات مسجلة بعد" sub="ضيف أول بند إيراد من الزر أعلاه عشان تقدر تشوف صافي الربح في بطاقة أداء المعدات" /></SectionCard>
       ) : (
         <>
-        <KPICard label={term || monthFrom || monthTo ? "إجمالي الإيرادات (حسب الفلتر الحالي)" : "إجمالي الإيرادات"} value={fmtMoney(grand)} icon={TrendingUp} />
         {SOURCES.map((owner) => {
           const ownerList = [...revenues].filter((r) => (r.owner || SOURCES[0]) === owner).filter(matches);
           const activeSourceFilter = sourceFilter[owner] || "الكل";
@@ -4887,10 +4890,16 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                 </button>
               }
             >
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                <KPICard label={`إجمالي إيراد معدات ${owner}`} value={fmtMoney(ownerAllTotal)} icon={TrendingUp} />
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <div className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
+                  <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>إجمالي إيراد معدات {owner}</div>
+                  <div className="font-extrabold tabular-nums text-sm" style={{ color: "#FFFFFF" }}>{fmtMoney(ownerAllTotal)}</div>
+                </div>
                 {bySource.map((b) => (
-                  <KPICard key={b.source} label={`من ${b.source}`} value={fmtMoney(b.total)} tone="gold" icon={Wallet} />
+                  <div key={b.source} className="text-center p-2 rounded-lg" style={{ background: "#101A2E" }}>
+                    <div className="text-[9px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.65)" }}>من {b.source}</div>
+                    <div className="font-extrabold tabular-nums text-sm" style={{ color: "#FFFFFF" }}>{fmtMoney(b.total)}</div>
+                  </div>
                 ))}
               </div>
 
@@ -4901,7 +4910,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                   className="px-3 py-1.5 rounded-lg text-xs font-bold"
                   style={{ background: activeSourceFilter === "الكل" ? COLORS.navy : COLORS.cream, color: activeSourceFilter === "الكل" ? "white" : COLORS.slate }}
                 >
-                  الكل — {fmtMoney(ownerAllTotal)}
+                  الكل
                 </button>
                 {bySource.map((b) => (
                   <button
@@ -4910,7 +4919,7 @@ function RevenueView({ revenues, expenses, equipmentCodes, onAdd, onUpdate, onDe
                     className="px-3 py-1.5 rounded-lg text-xs font-bold"
                     style={{ background: activeSourceFilter === b.source ? COLORS.navy : COLORS.cream, color: activeSourceFilter === b.source ? "white" : COLORS.slate }}
                   >
-                    من {b.source} — {fmtMoney(b.total)}
+                    من {b.source}
                   </button>
                 ))}
               </div>
