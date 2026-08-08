@@ -965,8 +965,6 @@ export default function App() {
         { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
         { key: "database", label: "قاعدة البيانات", icon: Database },
         { key: "revenue", label: "الإيرادات", icon: Wallet },
-        { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
-        { key: "claimPrint", label: "طباعة مستخلص", icon: Printer },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
@@ -1082,6 +1080,8 @@ export default function App() {
           .print-letterhead { padding-bottom: 14px; margin-bottom: 16px; border-bottom: 3px solid #B08D42; }
           .print-letterhead .co-name { font-size: 16px; }
           .print-letterhead .co-dept { font-size: 12px; margin-top: 2px; }
+          #print-area table.employees-print-table th,
+          #print-area table.employees-print-table td { padding: 4px 8px !important; font-size: 9px; line-height: 1.3; }
           #print-area thead { display: table-header-group; }
           #print-area tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
@@ -1232,7 +1232,6 @@ export default function App() {
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
-            {view === "claims" && <ClaimsView claims={claims} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addClaim} onUpdate={updateClaim} onDelete={deleteClaim} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
@@ -1247,7 +1246,6 @@ export default function App() {
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
             {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
             {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
-            {view === "claimPrint" && <ClaimPrintView claims={claims} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
@@ -4782,22 +4780,28 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
         ) : (
           SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
             const list = employees.filter((e) => (e.owner || SOURCES[0]) === owner).filter(matches).sort((a, b) => jobPriority(a.jobTitle) - jobPriority(b.jobTitle));
+            const fullCompanyName = owner === "هدي الإسلام" ? "شركة هدي الإسلام للمقاولات" : "شركة الكيان الهندسي للمقاولات";
             return (
-              <SectionCard
-                key={owner}
-                className={idx > 0 ? "print-page-break" : ""}
-                title={`موظفين ${owner} (${list.length})`}
-                action={
-                  <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-                    <Plus size={13} className="inline -mt-0.5" /> إضافة لموظفين {owner}
-                  </button>
-                }
-              >
+              <div key={owner} className={idx > 0 ? "print-page-break" : ""}>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="font-extrabold text-base" style={{ color: COLORS.ink }}>كشف الموظفين — {fullCompanyName}</div>
+                  <div className="text-center px-4 py-2 rounded-lg" style={{ background: "#101A2E" }}>
+                    <div className="text-[9px] font-bold mb-0.5" style={{ color: "rgba(255,255,255,0.65)" }}>عدد الموظفين</div>
+                    <div className="font-extrabold tabular-nums" style={{ color: "#FFFFFF" }}>{fmtNum(list.length)}</div>
+                  </div>
+                </div>
+                <SectionCard
+                  action={
+                    <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                      <Plus size={13} className="inline -mt-0.5" /> إضافة لموظفين {owner}
+                    </button>
+                  }
+                >
                 {list.length === 0 ? (
                   <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا يوجد موظفين مسجّلين لـ {owner}</div>
                 ) : (
                   <div className="overflow-x-auto -mx-5">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm employees-print-table">
                       <thead>
                         <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
                           {["الاسم", "الوظيفة", "موقع العمل", "كود التكلفة", "ملاحظات", ""].map((h) => (
@@ -4832,6 +4836,7 @@ function EmployeesView({ employees, equipmentCodes, onAdd, onUpdate, onDelete, o
                   </div>
                 )}
               </SectionCard>
+            </div>
             );
           })
         )}
