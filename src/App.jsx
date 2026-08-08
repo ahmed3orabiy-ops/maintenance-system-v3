@@ -2340,6 +2340,7 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [q, setQ] = useState("");
+  const [printOwner, setPrintOwner] = useState("الكل");
   const fileRef = useRef(null);
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState("append");
@@ -2574,16 +2575,29 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
         </SectionCard>
       )}
 
-      <div className="no-print relative">
-        <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
-        <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو النوع..." className="pr-9" />
+      <div className="no-print flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
+          <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو النوع..." className="pr-9" />
+        </div>
+        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+        {["الكل", ...SOURCES].map((opt) => (
+          <button
+            key={opt}
+            onClick={() => setPrintOwner(opt)}
+            className="px-3 py-2 rounded-lg text-xs font-bold"
+            style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+          >
+            {opt}
+          </button>
+        ))}
       </div>
 
       <div id="print-area">
       {records.length === 0 ? (
         <SectionCard><EmptyState icon={Fuel} title="لا توجد سجلات سولار بعد" /></SectionCard>
       ) : (
-        SOURCES.map((owner) => {
+        SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner) => {
           const list = [...records]
             .filter((r) => (ownerByCode[normCode(r.code)] || SOURCES[0]) === owner)
             .filter(matches)
@@ -2609,24 +2623,26 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
                   <table className="w-full text-sm">
                     <thead>
                       <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                        {["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "الإجمالي", "معدل الاستهلاك", ""].map((h) => (
-                          <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                        {["التاريخ", "كود المعدة", "النوع", "السائق", "المحطة", "المسافة", "الكمية", "العمولة", "الضريبة", "الإجمالي", "معدل الاستهلاك", ""].map((h) => (
+                          <th key={h} className={`px-2 py-2.5 text-right text-[11px] font-bold ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {list.map((r) => (
                         <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                          <td className="px-3 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.date}</td>
-                          <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{r.code}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">{r.vehicleType || "—"}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.driverName || "—"}</td>
-                          <td className="px-3 py-2.5 whitespace-nowrap text-xs">{r.station || "—"}</td>
-                          <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.distance)}</td>
-                          <td className="px-3 py-2.5 tabular-nums">{fmtNum(r.quantity)}</td>
-                          <td className="px-3 py-2.5 tabular-nums font-bold">{fmtMoney(r.total)}</td>
-                          <td className="px-3 py-2.5 tabular-nums">{(Number(r.rate) || 0).toFixed(2)}</td>
-                          <td className="px-3 py-2.5 no-print"><button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
+                          <td className="px-2 py-2.5 text-xs whitespace-nowrap" style={{ color: COLORS.slate }}>{r.date}</td>
+                          <td className="px-2 py-2.5 font-semibold whitespace-nowrap text-xs">{r.code}</td>
+                          <td className="px-2 py-2.5 text-xs">{r.vehicleType || "—"}</td>
+                          <td className="px-2 py-2.5 text-xs">{r.driverName || "—"}</td>
+                          <td className="px-2 py-2.5 text-xs">{r.station || "—"}</td>
+                          <td className="px-2 py-2.5 tabular-nums text-xs">{fmtNum(r.distance)}</td>
+                          <td className="px-2 py-2.5 tabular-nums text-xs">{fmtNum(r.quantity)}</td>
+                          <td className="px-2 py-2.5 tabular-nums text-xs">{fmtMoney(r.commission)}</td>
+                          <td className="px-2 py-2.5 tabular-nums text-xs">{fmtMoney(r.tax)}</td>
+                          <td className="px-2 py-2.5 tabular-nums font-bold text-xs">{fmtMoney(r.total)}</td>
+                          <td className="px-2 py-2.5 tabular-nums text-xs">{(Number(r.rate) || 0).toFixed(2)}</td>
+                          <td className="px-2 py-2.5 no-print"><button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
                         </tr>
                       ))}
                     </tbody>
