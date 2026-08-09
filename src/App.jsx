@@ -9,6 +9,7 @@ import {
   Search, Trash2, X, Plus, ChevronLeft, TrendingUp, TrendingDown,
   Building2, Fuel, ClipboardList, CheckCircle2, UploadCloud, FileSpreadsheet,
   MapPin, BarChart3, Filter, ShieldCheck, Loader2, Printer, ArrowLeft, Sparkles, Pencil, ListChecks, Menu, Sun, Moon,
+  BookOpen, Scale,
 } from "lucide-react";
 import { db, auth } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
@@ -75,6 +76,145 @@ const CATEGORIES = [
 ];
 const PAYMENT_METHODS = ["نقدي من العهدة", "تحويل بنكي", "شيك"];
 const CHART_COLORS = ["#101A2E", "#C69A3C", "#5B7A9E", "#8B9C6E", "#B5453A", "#647085"];
+
+/* ============================================================
+   المحاسبة — دليل الحسابات + محرك القيود المزدوجة التلقائي
+   ============================================================
+   الفكرة: مفيش "إدخال قيد" يدوي. كل عملية موجودة أصلاً في النظام
+   (تحويل عهدة، بند صرف، بند إيراد) بتتحول تلقائيًا لقيد مزدوج (مدين/دائن)
+   وقت العرض بس — من غير ما نلمس أو نغيّر بيانات العهد/المصروفات/الإيرادات
+   الأصلية. فلو عدّلت أو حذفت بند صرف عادي زي ما انت متعود، القيود بتتحدث
+   تلقائيًا لوحدها من غير أي تدخل.
+============================================================ */
+const ACCOUNT_TYPE_LABELS = { asset: "أصول", liability: "خصوم", equity: "حقوق ملكية", revenue: "إيرادات", expense: "مصروفات" };
+
+const CHART_OF_ACCOUNTS = [
+  { code: "1010", name: "البنك", type: "asset" },
+  { code: "1100", name: "عهدة تحت التصفية", type: "asset" },
+  { code: "1200", name: "إيرادات تأجير مستحقة", type: "asset" },
+  { code: "4000", name: "إيراد تأجير معدات", type: "revenue" },
+  { code: "5100", name: "مصروفات صيانة وتشغيل السيارات", type: "expense" },
+  { code: "5200", name: "مصروفات صيانة المعدات", type: "expense" },
+  { code: "5900", name: "مصروفات أخرى", type: "expense" },
+  { code: "3000", name: "صافي نتيجة القسم (أرباح/خسائر مرحّلة)", type: "equity" },
+];
+const ACCOUNT_BY_CODE = Object.fromEntries(CHART_OF_ACCOUNTS.map((a) => [a.code, a]));
+
+// تحويل تصنيف المصروف (CATEGORIES) لحساب مصروفات مناسب في دليل الحسابات
+const EXPENSE_ACCOUNT_BY_CATEGORY = {
+  "أولاً - مصروفات السيارات": "5100",
+  "ثانياً - صيانة المعدات": "5200",
+  "خامساً - مصروفات أخرى": "5900",
+};
+const expenseAccountForCategory = (cat) => EXPENSE_ACCOUNT_BY_CATEGORY[cat] || "5900";
+
+// بيبني كل القيود المزدوجة من بيانات النظام الحالية (عهد + مصروفات + إيرادات)
+// كل قيد = { id, date, ref, desc, equipmentCode, source, lines:[{account, debit, credit}] }
+function buildJournalEntries({ custodies = [], expenses = [], revenues = [] }) {
+  const entries = [];
+  const custodyById = Object.fromEntries((custodies || []).map((c) => [c.id, c]));
+
+  // 1) تحويل عهدة من البنك للقسم → مدين "عهدة تحت التصفية" / دائن "البنك"
+  (custodies || []).forEach((c) => {
+    const amt = Number(c.transfersIn) || 0;
+    if (amt <= 0) return;
+    entries.push({
+      id: `custody-${c.id}`, date: c.periodFrom || "", ref: c.label || "تحويل عهدة",
+      desc: `تحويل عهدة إلى ${c.source || ""} — ${c.label || ""}`, equipmentCode: "", source: c.source || "",
+      lines: [{ account: "1100", debit: amt, credit: 0 }, { account: "1010", debit: 0, credit: amt }],
+    });
+  });
+
+  // 2) كل بند صرف → مدين حساب المصروف (حسب التصنيف) / دائن "عهدة تحت التصفية"
+  (expenses || []).forEach((e) => {
+    const amt = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+    if (amt <= 0) return;
+    const custody = custodyById[e.custodyId];
+    const acc = expenseAccountForCategory(e.category);
+    entries.push({
+      id: `expense-${e.id}`, date: e.date || "", ref: e.equipmentCode || "", desc: e.purpose || e.category || "بند صرف",
+      equipmentCode: e.equipmentCode || "", source: custody?.source || e.source || "",
+      lines: [{ account: acc, debit: amt, credit: 0 }, { account: "1100", debit: 0, credit: amt }],
+    });
+  });
+
+  // 3) كل بند إيراد تأجير معدة → مدين "إيرادات تأجير مستحقة" / دائن "إيراد تأجير معدات"
+  (revenues || []).forEach((r) => {
+    const amt = Number(r.total ?? r.amount) || 0;
+    if (amt <= 0) return;
+    entries.push({
+      id: `revenue-${r.id}`, date: r.month ? `${r.month}-01` : (r.date || ""), ref: r.equipmentCode || "",
+      desc: `إيراد تأجير ${r.equipmentCode || ""} — ${r.location || r.owner || ""}`,
+      equipmentCode: r.equipmentCode || "", source: r.owner || "",
+      lines: [{ account: "1200", debit: amt, credit: 0 }, { account: "4000", debit: 0, credit: amt }],
+    });
+  });
+
+  return entries.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+}
+
+// دفتر الأستاذ: كل حركات حساب معيّن مرتبة بالتاريخ مع رصيد متراكم
+function buildLedgerForAccount(entries, accountCode) {
+  const rows = [];
+  let running = 0;
+  entries.forEach((en) => {
+    en.lines.filter((l) => l.account === accountCode).forEach((l) => {
+      running += (Number(l.debit) || 0) - (Number(l.credit) || 0);
+      rows.push({ date: en.date, desc: en.desc, equipmentCode: en.equipmentCode, debit: l.debit, credit: l.credit, balance: running });
+    });
+  });
+  return rows;
+}
+
+// ميزان المراجعة: إجمالي مدين/دائن/رصيد لكل حساب
+function buildTrialBalance(entries) {
+  const totals = {};
+  CHART_OF_ACCOUNTS.forEach((a) => { totals[a.code] = { debit: 0, credit: 0 }; });
+  entries.forEach((en) => en.lines.forEach((l) => {
+    if (!totals[l.account]) totals[l.account] = { debit: 0, credit: 0 };
+    totals[l.account].debit += Number(l.debit) || 0;
+    totals[l.account].credit += Number(l.credit) || 0;
+  }));
+  return CHART_OF_ACCOUNTS.map((a) => {
+    const t = totals[a.code] || { debit: 0, credit: 0 };
+    const balance = t.debit - t.credit;
+    return { ...a, debit: t.debit, credit: t.credit, balance };
+  });
+}
+
+// قائمة الدخل + الربحية لكل كود معدة (المعدة كمركز تكلفة/مشروع)
+function buildIncomeStatement(entries) {
+  const revenueTotal = entries.reduce((s, en) => s + en.lines.filter((l) => l.account === "4000").reduce((s2, l) => s2 + (Number(l.credit) || 0), 0), 0);
+  const expenseByAccount = {};
+  entries.forEach((en) => en.lines.forEach((l) => {
+    const acc = ACCOUNT_BY_CODE[l.account];
+    if (acc && acc.type === "expense" && Number(l.debit) > 0) {
+      expenseByAccount[l.account] = (expenseByAccount[l.account] || 0) + Number(l.debit);
+    }
+  }));
+  const expenseTotal = Object.values(expenseByAccount).reduce((s, v) => s + v, 0);
+
+  const byCode = {};
+  entries.forEach((en) => {
+    const code = en.equipmentCode || "بدون كود / عام";
+    if (!byCode[code]) byCode[code] = { revenue: 0, expense: 0 };
+    en.lines.forEach((l) => {
+      if (l.account === "4000") byCode[code].revenue += Number(l.credit) || 0;
+      const acc = ACCOUNT_BY_CODE[l.account];
+      if (acc && acc.type === "expense") byCode[code].expense += Number(l.debit) || 0;
+    });
+  });
+  const byEquipment = Object.entries(byCode)
+    .filter(([, v]) => v.revenue > 0 || v.expense > 0)
+    .map(([code, v]) => ({ code, revenue: v.revenue, expense: v.expense, net: v.revenue - v.expense }))
+    .sort((a, b) => b.net - a.net);
+
+  return {
+    revenueTotal, expenseTotal, net: revenueTotal - expenseTotal,
+    expenseLines: CHART_OF_ACCOUNTS.filter((a) => a.type === "expense").map((a) => ({ ...a, amount: expenseByAccount[a.code] || 0 })),
+    byEquipment,
+  };
+}
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -968,6 +1108,7 @@ export default function App() {
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
+        { key: "accounting", label: "المحاسبة (قيود مزدوجة)", icon: BookOpen },
       ],
     },
     {
@@ -1237,6 +1378,7 @@ export default function App() {
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
+            {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} revenues={revenues} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
@@ -1310,6 +1452,7 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "dashboard", label: "تقرير تنفيذي", desc: "مؤشرات حية ورسوم بيانية شاملة", icon: LayoutDashboard, color: COLORS.navy },
     { key: "analysis", label: "تحليل المصروفات", desc: "المواقع، الاتجاه الزمني، ومقارنة العهد", icon: BarChart3, color: "#2E7A50" },
     { key: "revenueAnalysis", label: "تحليل الإيرادات", desc: "أداء الإيراد لكل معدة وجهة مستأجرة", icon: TrendingUp, color: COLORS.gold },
+    { key: "accounting", label: "المحاسبة", desc: "دليل حسابات، قيود مزدوجة تلقائية، دفتر أستاذ، وميزان مراجعة", icon: BookOpen, color: "#2E5A8C" },
     { key: "entry", label: "إدخال بند صرف", desc: "سجّل معاملة مصروف جديدة", icon: FilePlus2, color: "#5B7A9E" },
     { key: "revenue", label: "الإيرادات", desc: "سجّل إيراد تأجير معدة شهري", icon: Wallet, color: "#8B9C6E" },
     { key: "custodies", label: "العهد", desc: "إدارة عهد الصرف لكل جهة", icon: ClipboardList, color: "#647085" },
@@ -6070,6 +6213,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const [chunkPlan, setChunkPlan] = useState({});
   const PAGE_BUDGET_PX = 1850; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش) — مرفوع عشان الصفحة تتملى كامل
   const FIRST_PAGE_EXTRA_USED_PX = 300; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
+  const ROW_SAFETY_MARGIN_PX = 14; // هامش أمان لكل صف عشان نتجنب إن فرق بسيط في القياس يرجع صف كامل (أو تجميعة صفوف) للصفحة اللي بعدها ويسيب فراغ
 
   useLayoutEffect(() => {
     const plan = {};
@@ -6082,7 +6226,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
       const chunks = [];
       let count = 0;
       g.rawRows.forEach((row, idx) => {
-        const h = els[idx]?.offsetHeight || 24;
+        const h = (els[idx]?.offsetHeight || 24) + ROW_SAFETY_MARGIN_PX;
         if (count > 0 && h > remaining) {
           chunks.push(count);
           remaining = PAGE_BUDGET_PX;
@@ -6134,9 +6278,25 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   return (
     <div className="space-y-6">
-      {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============ */}
-      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 720 }}>
-        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 720 }}>
+      {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============
+          مهم: العرض والـ colgroup هنا لازم يكونوا مطابقين تمامًا لجدول الطباعة الفعلي تحت،
+          لأن أي فرق في العرض بيغيّر التفاف النص (خصوصًا عمود "الغرض من الصرف") وبالتالي الارتفاع الحقيقي،
+          وده اللي كان بيخلي الحسبة غلط ويسيب فراغ في آخر الصفحة قبل ما ينقل للصفحة اللي بعدها. */}
+      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 900 }}>
+        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
+          <colgroup>
+            <col style={{ width: "3%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "9%" }} />
+          </colgroup>
           <tbody>
             {groupedRaw.map((g) => (
               <React.Fragment key={g.cat}>
@@ -6331,6 +6491,252 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 /* ============================================================
    طباعة مستخلص
 ============================================================ */
+/* ============================================================
+   المحاسبة — الشاشة
+============================================================ */
+function AccountingView({ custodies, expenses, revenues }) {
+  const [tab, setTab] = useState("journal"); // journal | accounts | ledger | trial | income
+  const [ledgerAccount, setLedgerAccount] = useState("1100");
+
+  const entries = useMemo(() => buildJournalEntries({ custodies, expenses, revenues }), [custodies, expenses, revenues]);
+  const trialBalance = useMemo(() => buildTrialBalance(entries), [entries]);
+  const income = useMemo(() => buildIncomeStatement(entries), [entries]);
+  const ledgerRows = useMemo(() => buildLedgerForAccount(entries, ledgerAccount), [entries, ledgerAccount]);
+
+  const totalDebit = trialBalance.reduce((s, a) => s + a.debit, 0);
+  const totalCredit = trialBalance.reduce((s, a) => s + a.credit, 0);
+  const isBalanced = Math.abs(totalDebit - totalCredit) < 1;
+
+  const TABS = [
+    { key: "journal", label: "القيود اليومية", icon: FilePlus2 },
+    { key: "accounts", label: "دليل الحسابات", icon: ListChecks },
+    { key: "ledger", label: "دفتر الأستاذ", icon: BookOpen },
+    { key: "trial", label: "ميزان المراجعة", icon: Scale },
+    { key: "income", label: "قائمة الدخل وربحية المعدات", icon: TrendingUp },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <Header title="المحاسبة" sub="قيود مزدوجة (مدين/دائن) بتتولّد تلقائيًا من العهد والمصروفات والإيرادات — من غير أي إدخال يدوي" />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          ["إجمالي المدين", totalDebit],
+          ["إجمالي الدائن", totalCredit],
+          ["صافي نتيجة القسم", income.net],
+          ["عدد القيود", entries.length],
+        ].map(([label, val], i) => (
+          <div key={label} className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+            <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>{label}</div>
+            <div className="text-lg font-extrabold tabular-nums" style={{ color: i === 2 ? (income.net >= 0 ? "#1B5E20" : COLORS.danger) : COLORS.ink }}>
+              {i === 3 ? fmtNum(val) : fmtMoney(val)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!isBalanced && (
+        <div className="p-3 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: "#FDECEA", color: COLORS.danger }}>
+          <AlertTriangle size={16} /> تحذير: ميزان المراجعة مش متوازن (فرق {fmtMoney(totalDebit - totalCredit)}) — راجع البيانات
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className="px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1.5"
+            style={{ background: tab === t.key ? COLORS.navy : "transparent", color: tab === t.key ? "white" : COLORS.slate }}
+          >
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "accounts" && (
+        <SectionCard title={`دليل الحسابات (${CHART_OF_ACCOUNTS.length})`}>
+          <div className="overflow-x-auto -mx-5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                  {["كود الحساب", "اسم الحساب", "النوع"].map((h) => (
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {CHART_OF_ACCOUNTS.map((a) => (
+                  <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-3 py-2.5 font-bold tabular-nums">{a.code}</td>
+                    <td className="px-3 py-2.5">{a.name}</td>
+                    <td className="px-3 py-2.5">{ACCOUNT_TYPE_LABELS[a.type]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+
+      {tab === "journal" && (
+        <SectionCard title={`القيود اليومية (${entries.length})`}>
+          {entries.length === 0 ? (
+            <EmptyState icon={FilePlus2} title="لا توجد قيود بعد" sub="القيود بتتولّد تلقائيًا أول ما تسجّل عهدة أو مصروف أو إيراد" />
+          ) : (
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["التاريخ", "البيان", "كود المعدة", "من حـ/ (مدين)", "إلى حـ/ (دائن)", "المبلغ"].map((h) => (
+                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((en) => {
+                    const debitLine = en.lines.find((l) => l.debit > 0);
+                    const creditLine = en.lines.find((l) => l.credit > 0);
+                    return (
+                      <tr key={en.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{en.date || "—"}</td>
+                        <td className="px-3 py-2.5">{en.desc}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{en.equipmentCode || "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{debitLine ? `${debitLine.account} - ${ACCOUNT_BY_CODE[debitLine.account]?.name}` : "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{creditLine ? `${creditLine.account} - ${ACCOUNT_BY_CODE[creditLine.account]?.name}` : "—"}</td>
+                        <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{fmtMoney(debitLine?.debit || creditLine?.credit)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {tab === "ledger" && (
+        <SectionCard
+          title="دفتر الأستاذ"
+          action={
+            <Select value={ledgerAccount} onChange={(e) => setLedgerAccount(e.target.value)} className="w-64">
+              {CHART_OF_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+            </Select>
+          }
+        >
+          {ledgerRows.length === 0 ? (
+            <EmptyState icon={BookOpen} title="لا توجد حركات على الحساب ده" />
+          ) : (
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["التاريخ", "البيان", "كود المعدة", "مدين", "دائن", "الرصيد"].map((h) => (
+                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledgerRows.map((r, i) => (
+                    <tr key={i} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{r.date || "—"}</td>
+                      <td className="px-3 py-2.5">{r.desc}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{r.equipmentCode || "—"}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{r.debit ? fmtMoney(r.debit) : ""}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{r.credit ? fmtMoney(r.credit) : ""}</td>
+                      <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(r.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {tab === "trial" && (
+        <SectionCard title="ميزان المراجعة">
+          <div className="overflow-x-auto -mx-5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                  {["كود الحساب", "اسم الحساب", "مدين", "دائن", "الرصيد"].map((h) => (
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {trialBalance.map((a) => (
+                  <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-3 py-2.5 font-bold tabular-nums">{a.code}</td>
+                    <td className="px-3 py-2.5">{a.name}</td>
+                    <td className="px-3 py-2.5 tabular-nums">{a.debit ? fmtMoney(a.debit) : "—"}</td>
+                    <td className="px-3 py-2.5 tabular-nums">{a.credit ? fmtMoney(a.credit) : "—"}</td>
+                    <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(a.balance)}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2" style={{ borderColor: COLORS.ink, background: COLORS.cream }}>
+                  <td colSpan={2} className="px-3 py-2.5 font-extrabold">الإجمالي</td>
+                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalDebit)}</td>
+                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalCredit)}</td>
+                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalDebit - totalCredit)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      )}
+
+      {tab === "income" && (
+        <div className="space-y-6">
+          <SectionCard title="قائمة الدخل الإجمالية">
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between py-2 border-b" style={{ borderColor: COLORS.border }}>
+                <span className="font-bold">إجمالي إيراد تأجير المعدات</span>
+                <span className="font-bold tabular-nums" style={{ color: "#1B5E20" }}>{fmtMoney(income.revenueTotal)}</span>
+              </div>
+              {income.expenseLines.map((l) => (
+                <div key={l.code} className="flex justify-between py-1.5">
+                  <span style={{ color: COLORS.slate }}>{l.name}</span>
+                  <span className="tabular-nums" style={{ color: COLORS.danger }}>{fmtMoney(l.amount)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between py-2 border-t-2 mt-2" style={{ borderColor: COLORS.ink }}>
+                <span className="font-extrabold">صافي نتيجة القسم</span>
+                <span className="font-extrabold tabular-nums" style={{ color: income.net >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(income.net)}</span>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard title={`ربحية كل معدة كمركز تكلفة/مشروع مستقل (${income.byEquipment.length})`}>
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["كود المعدة", "الإيراد", "المصروفات", "صافي الربح/الخسارة"].map((h) => (
+                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {income.byEquipment.map((r) => (
+                    <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-3 py-2.5 font-semibold">{r.code}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{fmtMoney(r.revenue)}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{fmtMoney(r.expense)}</td>
+                      <td className="px-3 py-2.5 font-bold tabular-nums" style={{ color: r.net >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.net)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SectionCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClaimPrintView({ claims }) {
   const ownerMonths = useMemo(() => {
     const set = new Set();
