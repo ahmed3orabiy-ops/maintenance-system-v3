@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, LineChart, Line,
@@ -1066,7 +1066,8 @@ export default function App() {
           #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; }
           #print-area table:not(.custody-print-table) { border-collapse: collapse; }
           #print-area table.custody-print-table { border-collapse: separate; border-spacing: 0; }
-          #print-area table.custody-print-table, #print-area table.profit-table { table-layout: fixed; }
+          #print-area table.profit-table { table-layout: fixed; }
+          #print-area table.custody-print-table { table-layout: auto; }
           /* الجداول العادية (كل حاجة ماعدا طباعة عهدة والربحية) — تنسيق أنضف */
           #print-area table:not(.custody-print-table):not(.profit-table) { font-size: 9.5px; }
           #print-area table:not(.custody-print-table):not(.profit-table) th,
@@ -6030,37 +6031,82 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     return withIdx.map((x) => x.r);
   };
 
-  const CHUNK_SIZE = 10; // نعيد الدمج من جديد كل 10 بنود عشان الصفحة تتملى كويس من غير فراغات كبيرة
-  const withMergeInfo = (rows) => {
+  // نطبّق الدمج (rowSpan) داخل قطعة واحدة بس (صفحة واحدة)، مش عبر كل بنود المعدة
+  const withMergeInfo = (rows, chunkSizes) => {
     const result = [];
-    let i = 0;
-    while (i < rows.length) {
-      const key = mergeKey(rows[i].equipmentCode);
-      if (!key) {
-        result.push({ ...rows[i], _mergeStart: true, _mergeSpan: 1 });
-        i++;
-        continue;
-      }
-      let runEnd = i + 1;
-      while (runEnd < rows.length && mergeKey(rows[runEnd].equipmentCode) === key) runEnd++;
-      for (let start = i; start < runEnd; start += CHUNK_SIZE) {
-        const end = Math.min(start + CHUNK_SIZE, runEnd);
-        const span = end - start;
-        for (let j = start; j < end; j++) {
-          result.push({ ...rows[j], _mergeStart: j === start, _mergeSpan: span });
+    let pos = 0;
+    const sizes = chunkSizes && chunkSizes.length ? chunkSizes : [rows.length];
+    sizes.forEach((size) => {
+      const section = rows.slice(pos, pos + size);
+      pos += size;
+      let i = 0;
+      while (i < section.length) {
+        const key = mergeKey(section[i].equipmentCode);
+        if (!key) {
+          result.push({ ...section[i], _mergeStart: true, _mergeSpan: 1, _chunkEnd: i === section.length - 1 });
+          i++;
+          continue;
         }
+        let runEnd = i + 1;
+        while (runEnd < section.length && mergeKey(section[runEnd].equipmentCode) === key) runEnd++;
+        const span = runEnd - i;
+        for (let j = i; j < runEnd; j++) {
+          result.push({ ...section[j], _mergeStart: j === i, _mergeSpan: span, _chunkEnd: j === section.length - 1 });
+        }
+        i = runEnd;
       }
-      i = runEnd;
-    }
+    });
     return result;
   };
 
-  const grouped = CATEGORIES.map((cat) => ({
+  const groupedRaw = CATEGORIES.map((cat) => ({
     cat,
-    rows: withMergeInfo(sortForMerge(items.filter((e) => e.category === cat))),
-  })).filter((g) => g.rows.length > 0);
+    rawRows: sortForMerge(items.filter((e) => e.category === cat)),
+  })).filter((g) => g.rawRows.length > 0);
+
+  // ============ قياس حقيقي لارتفاع كل بند عشان نقسّم الصفحات صح ============
+  const measureRefs = useRef({});
+  const bannerRefs = useRef({});
+  const [chunkPlan, setChunkPlan] = useState({});
+  const PAGE_BUDGET_PX = 980; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش)
+  const FIRST_PAGE_EXTRA_USED_PX = 260; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
+
+  useLayoutEffect(() => {
+    const plan = {};
+    let remaining = PAGE_BUDGET_PX - FIRST_PAGE_EXTRA_USED_PX;
+    groupedRaw.forEach((g) => {
+      const els = measureRefs.current[g.cat] || [];
+      const bannerH = bannerRefs.current[g.cat]?.offsetHeight || 34;
+      if (remaining < bannerH + 40) remaining = PAGE_BUDGET_PX; // مفيش مساحة كفاية حتى للعنوان، ابدأ صفحة جديدة
+      remaining -= bannerH;
+      const chunks = [];
+      let count = 0;
+      g.rawRows.forEach((row, idx) => {
+        const h = els[idx]?.offsetHeight || 24;
+        if (count > 0 && h > remaining) {
+          chunks.push(count);
+          remaining = PAGE_BUDGET_PX;
+          count = 0;
+        }
+        remaining -= h;
+        count++;
+      });
+      if (count > 0) chunks.push(count);
+      plan[g.cat] = chunks;
+    });
+    setChunkPlan(plan);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, custodyId]);
+
+  const grouped = groupedRaw.map((g) => ({
+    cat: g.cat,
+    rows: withMergeInfo(g.rawRows, chunkPlan[g.cat]),
+  }));
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
+
+  const now = new Date();
+  const printedAt = now.toLocaleString("ar-EG", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
   const handlePrint = () => {
     window.print();
@@ -6088,6 +6134,36 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   return (
     <div className="space-y-6">
+      {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============ */}
+      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 900 }}>
+        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
+          <tbody>
+            {groupedRaw.map((g) => (
+              <React.Fragment key={g.cat}>
+                <tr ref={(el) => { bannerRefs.current[g.cat] = el; }}>
+                  <td colSpan={11} className="border px-3 py-1.5 font-extrabold">{g.cat}</td>
+                </tr>
+                {g.rawRows.map((e, idx) => (
+                  <tr key={e.id} ref={(el) => { if (!measureRefs.current[g.cat]) measureRefs.current[g.cat] = []; measureRefs.current[g.cat][idx] = el; }}>
+                    <td className="border px-2.5 py-2 text-center">{idx + 1}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.date}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.equipmentCode || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.equipmentType || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.brand || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.location || "—"}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed">{e.purpose}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed">{e.notes || ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="no-print">
         <Header
           title="طباعة عهدة"
@@ -6168,9 +6244,11 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               {(() => {
                 const chunks = [];
                 g.rows.forEach((row) => {
-                  if (row._mergeStart || chunks.length === 0) chunks.push([row]);
+                  if (chunks.length === 0) chunks.push([row]);
                   else chunks[chunks.length - 1].push(row);
+                  if (row._chunkEnd) chunks.push([]);
                 });
+                if (chunks.length && chunks[chunks.length - 1].length === 0) chunks.pop();
                 let runningIndex = 0;
                 return chunks.map((chunk, ci) => {
                   const startIndex = runningIndex;
@@ -6241,7 +6319,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           </div>
           {userEmail && (
             <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
-              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span>
+              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span> — بتاريخ {printedAt}
             </div>
           )}
         </div>
