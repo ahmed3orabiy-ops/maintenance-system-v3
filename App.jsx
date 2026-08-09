@@ -1063,7 +1063,9 @@ export default function App() {
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
-          #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; border-collapse: collapse; }
+          #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; }
+          #print-area table:not(.custody-print-table) { border-collapse: collapse; }
+          #print-area table.custody-print-table { border-collapse: separate; border-spacing: 0; }
           #print-area table.custody-print-table, #print-area table.profit-table { table-layout: fixed; }
           /* الجداول العادية (كل حاجة ماعدا طباعة عهدة والربحية) — تنسيق أنضف */
           #print-area table:not(.custody-print-table):not(.profit-table) { font-size: 9.5px; }
@@ -1083,7 +1085,8 @@ export default function App() {
           #print-area table.employees-print-table th,
           #print-area table.employees-print-table td { padding: 4px 8px !important; font-size: 9px; line-height: 1.3; }
           #print-area thead { display: table-header-group; }
-          #print-area tr { page-break-inside: avoid; }
+          #print-area table:not(.custody-print-table) tr { page-break-inside: avoid; }
+          #print-area table.custody-print-table tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
           .print-page-break { page-break-before: always; break-before: page; }
           #print-area table.profit-table { font-size: 7px; }
@@ -1245,7 +1248,7 @@ export default function App() {
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
             {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
-            {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} />}
+            {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} userEmail={authUser && authUser.email} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
@@ -6004,7 +6007,7 @@ const SIGNATURES = [
   "رئيس مجلس الإدارة",
 ];
 
-function PrintView({ custodies, custodyTotals, expenses }) {
+function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const [custodyId, setCustodyId] = useState(custodies[0]?.id || "");
   const printRef = useRef(null);
   const custody = custodies.find((c) => c.id === custodyId);
@@ -6152,21 +6155,11 @@ function PrintView({ custodies, custodyTotals, expenses }) {
                 {g.rows.map((e, i) => (
                   <tr key={e.id}>
                     <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
-                    {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
-                    )}
-                    {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
-                    )}
-                    {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
-                    )}
-                    {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
-                    )}
-                    {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
-                    )}
+                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
+                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
                     <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
                     <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
                     <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
@@ -6205,6 +6198,11 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               </div>
             ))}
           </div>
+          {userEmail && (
+            <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
+              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
