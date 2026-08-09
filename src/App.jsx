@@ -6151,7 +6151,7 @@ function PrintView({ custodies, custodyTotals, expenses }) {
               <tbody>
                 {g.rows.map((e, i) => (
                   <tr key={e.id}>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
                     {e._mergeStart && (
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
                     )}
