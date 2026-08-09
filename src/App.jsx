@@ -1063,7 +1063,9 @@ export default function App() {
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
-          #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; border-collapse: collapse; }
+          #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; }
+          #print-area table:not(.custody-print-table) { border-collapse: collapse; }
+          #print-area table.custody-print-table { border-collapse: separate; border-spacing: 0; }
           #print-area table.custody-print-table, #print-area table.profit-table { table-layout: fixed; }
           /* الجداول العادية (كل حاجة ماعدا طباعة عهدة والربحية) — تنسيق أنضف */
           #print-area table:not(.custody-print-table):not(.profit-table) { font-size: 9.5px; }
