@@ -6068,8 +6068,8 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const measureRefs = useRef({});
   const bannerRefs = useRef({});
   const [chunkPlan, setChunkPlan] = useState({});
-  const PAGE_BUDGET_PX = 980; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش)
-  const FIRST_PAGE_EXTRA_USED_PX = 260; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
+  const PAGE_BUDGET_PX = 1850; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش) — مرفوع عشان الصفحة تتملى كامل
+  const FIRST_PAGE_EXTRA_USED_PX = 300; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
 
   useLayoutEffect(() => {
     const plan = {};
@@ -6135,8 +6135,8 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   return (
     <div className="space-y-6">
       {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============ */}
-      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 900 }}>
-        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
+      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 720 }}>
+        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 720 }}>
           <tbody>
             {groupedRaw.map((g) => (
               <React.Fragment key={g.cat}>
