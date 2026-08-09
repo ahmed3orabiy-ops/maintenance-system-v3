@@ -1085,7 +1085,7 @@ export default function App() {
           #print-area table.employees-print-table th,
           #print-area table.employees-print-table td { padding: 4px 8px !important; font-size: 9px; line-height: 1.3; }
           #print-area thead { display: table-header-group; }
-          #print-area tr { page-break-inside: avoid; }
+          #print-area table:not(.custody-print-table) tr { page-break-inside: avoid; }
           .totals-signatures-block { page-break-inside: avoid; }
           .print-page-break { page-break-before: always; break-before: page; }
           #print-area table.profit-table { font-size: 7px; }
