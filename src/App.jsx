@@ -6030,16 +6030,30 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     return withIdx.map((x) => x.r);
   };
 
-  const withMergeInfo = (rows) => rows.map((row, i) => {
-    const key = mergeKey(row.equipmentCode);
-    const prevKey = i > 0 ? mergeKey(rows[i - 1].equipmentCode) : "";
-    const isNewGroup = i === 0 || !key || prevKey !== key;
-    let span = 1;
-    if (isNewGroup && key) {
-      for (let j = i + 1; j < rows.length && mergeKey(rows[j].equipmentCode) === key; j++) span++;
+  const CHUNK_SIZE = 10; // نعيد الدمج من جديد كل 10 بنود عشان الصفحة تتملى كويس من غير فراغات كبيرة
+  const withMergeInfo = (rows) => {
+    const result = [];
+    let i = 0;
+    while (i < rows.length) {
+      const key = mergeKey(rows[i].equipmentCode);
+      if (!key) {
+        result.push({ ...rows[i], _mergeStart: true, _mergeSpan: 1 });
+        i++;
+        continue;
+      }
+      let runEnd = i + 1;
+      while (runEnd < rows.length && mergeKey(rows[runEnd].equipmentCode) === key) runEnd++;
+      for (let start = i; start < runEnd; start += CHUNK_SIZE) {
+        const end = Math.min(start + CHUNK_SIZE, runEnd);
+        const span = end - start;
+        for (let j = start; j < end; j++) {
+          result.push({ ...rows[j], _mergeStart: j === start, _mergeSpan: span });
+        }
+      }
+      i = runEnd;
     }
-    return { ...row, _mergeStart: isNewGroup, _mergeSpan: span };
-  });
+    return result;
+  };
 
   const grouped = CATEGORIES.map((cat) => ({
     cat,
@@ -6151,23 +6165,50 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                {g.rows.map((e, i) => (
-                  <tr key={e.id}>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {(() => {
+                const chunks = [];
+                g.rows.forEach((row) => {
+                  if (row._mergeStart || chunks.length === 0) chunks.push([row]);
+                  else chunks[chunks.length - 1].push(row);
+                });
+                let runningIndex = 0;
+                return chunks.map((chunk, ci) => {
+                  const startIndex = runningIndex;
+                  runningIndex += chunk.length;
+                  return (
+                    <tbody key={ci} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      {chunk.map((e, localI) => {
+                        const i = startIndex + localI;
+                        return (
+                          <tr key={e.id}>
+                            <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
+                            )}
+                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
+                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  );
+                });
+              })()}
             </table>
           ))}
           <div className="totals-signatures-block">
