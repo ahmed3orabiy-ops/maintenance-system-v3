@@ -6733,15 +6733,15 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               <colgroup>
                 <col style={{ width: "4%" }} />
                 <col style={{ width: "10%" }} />
-                <col style={{ width: "11%" }} />
+                <col style={{ width: "14%" }} />
                 <col style={{ width: "8%" }} />
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "7%" }} />
                 <col style={{ width: "16%" }} />
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "9%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "8%" }} />
+                <col style={{ width: "7%" }} />
+                <col style={{ width: "7%" }} />
               </colgroup>
               <thead>
                 <tr style={{ background: "#E8C978" }}>
@@ -6782,13 +6782,14 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               </tbody>
             </table>
           ))}
+          </div>
           <div className="totals-signatures-block">
           <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
             <colgroup>
-              <col style={{ width: "4%" }} /><col style={{ width: "10%" }} /><col style={{ width: "11%" }} />
+              <col style={{ width: "4%" }} /><col style={{ width: "10%" }} /><col style={{ width: "14%" }} />
               <col style={{ width: "8%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} />
               <col style={{ width: "16%" }} /><col style={{ width: "9%" }} />
-              <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} />
+              <col style={{ width: "9%" }} /><col style={{ width: "7%" }} /><col style={{ width: "7%" }} />
             </colgroup>
             <tbody>
               <tr style={{ background: "#101A2E", color: "white" }}>
@@ -6799,16 +6800,15 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               </tr>
             </tbody>
           </table>
-          </div>
-          </div>
 
-          <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
+          <div className="grid grid-cols-4 gap-6 mt-3 pt-3">
             {SIGNATURES.map((s) => (
               <div key={s} className="text-center">
-                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="border-b pb-6 mb-1" style={{ borderColor: "#101A2E" }} />
                 <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>التوقيع / {s}</div>
               </div>
             ))}
+          </div>
           </div>
         </div>
       )}
