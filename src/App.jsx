@@ -6779,14 +6779,6 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                     <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
                   </tr>
                 ))}
-                {/* صفوف فاضية بنفس خطوط الأعمدة — عشان شكل الصفحة يبقى مكتمل زي دفتر محاسبة عادي، مش يوقف فجأة */}
-                {Array.from({ length: 10 }).map((_, fi) => (
-                  <tr key={`filler-${fi}`}>
-                    {Array.from({ length: 11 }).map((__, ci) => (
-                      <td key={ci} className="border px-2.5 py-2" style={{ borderColor: "#E3DDCE" }}>&nbsp;</td>
-                    ))}
-                  </tr>
-                ))}
               </tbody>
             </table>
           ))}
