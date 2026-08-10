@@ -688,104 +688,134 @@ function downloadPrintableHTML(title, bodyHtml, filename) {
 /* ============================================================
    تصدير PDF بترقيم صفحات إحنا اللي بنتحكم فيه بالكامل — مش المتصفح
    ============================================================
-   الفكرة: بدل ما نسيب المتصفح يقرر فين يقفل كل صفحة (غير موثوق ومختلف من متصفح لمتصفح)،
-   بنقيس الارتفاع الحقيقي لكل صف من الـ DOM الفعلي اللي هيتصور (مش نسخة موازية تقديرية زي قبل كده)،
-   وبنقرر إحنا فين نقطع كل صفحة، وبعدين بنصوّر (html2canvas) كل جزء ونضيفه كصفحة في PDF (jsPDF).
-   عشان كده الأرقام هنا مضمونة 100% لأنها مأخوذة من نفس العنصر اللي هيتصوّر بالظبط.
+   الفكرة: مؤشر مكان واحد مستمر عبر المستند كله (مش لكل قسم لوحده) — عشان أي قسم جديد
+   يكمل يملي الفراغ المتبقي في نفس الصفحة بدل ما يبدأ صفحة جديدة. الدمج (rowSpan) بيفضل
+   زي ما هو في الشاشة، وأي مجموعة معدة اتقطعت بين صفحتين بتاخد "لابل" تابع فوق أول صف
+   في الصفحة الجديدة. الارتفاعات كلها مقاسة من نفس الـ DOM الحقيقي اللي هيتصوّر (مش تقدير).
 ============================================================ */
-async function exportTablesToPaginatedPDF({ tables, filename, pageMarginMM = 10 }) {
+async function exportCustodyPDF({ letterheadEl, categories, totalsEl, signaturesEl, filename, pageMarginMM = 10 }) {
   const PAGE_W_MM = 210, PAGE_H_MM = 297; // A4
   const contentWmm = PAGE_W_MM - pageMarginMM * 2;
   const contentHmm = PAGE_H_MM - pageMarginMM * 2;
-  const pdf = new jsPDF("p", "mm", "a4");
-  let firstPage = true;
+  const CAPTURE_SCALE = 1.5;
+  const LABEL_H_PX = 34;
 
-  for (const tableInfo of tables) {
-    const { theadEl, tbodyEl, rowMeta } = tableInfo; // rowMeta: [{ el, isMergeStart, mergeKey }]
-    if (!tbodyEl || rowMeta.length === 0) continue;
+  const containerWidthPx = letterheadEl.offsetWidth;
+  const mmPerPx = contentWmm / containerWidthPx;
+  const pageHeightPx = contentHmm / mmPerPx;
 
-    const containerWidthPx = tbodyEl.offsetWidth || tbodyEl.parentElement.offsetWidth;
-    const mmPerPx = contentWmm / containerWidthPx;
-    const pageHeightPx = contentHmm / mmPerPx;
+  const cap = (el) => html2canvas(el, { scale: CAPTURE_SCALE, backgroundColor: "#ffffff" });
 
-    // صورة الترويسة (اسم القسم + رؤوس الأعمدة) — بتتكرر فوق كل صفحة
-    const theadCanvas = await html2canvas(theadEl, { scale: 2, backgroundColor: "#ffffff" });
+  const letterheadCanvas = await cap(letterheadEl);
+  const totalsCanvas = totalsEl ? await cap(totalsEl) : null;
+  const signaturesCanvas = signaturesEl ? await cap(signaturesEl) : null;
 
-    // صورة كل جدول البيانات مرة واحدة (بالدمج الطبيعي بتاعه زي ما هو ظاهر في الشاشة)
-    const bodyCanvas = await html2canvas(tbodyEl, { scale: 2, backgroundColor: "#ffffff" });
-    const canvasScale = bodyCanvas.width / containerWidthPx;
-
-    // نحسب حدود كل صف بالبكسل الحقيقي (offsetTop/offsetHeight فعلي، مش تقدير)
+  const catData = [];
+  for (const c of categories) {
+    if (!c.tbodyEl || !c.rowMeta || c.rowMeta.length === 0) continue;
+    const theadCanvas = await cap(c.theadEl);
+    const bodyCanvas = await cap(c.tbodyEl);
+    const bodyScale = bodyCanvas.width / containerWidthPx;
     let cum = 0;
-    const rowBounds = rowMeta.map((r) => {
+    const rows = c.rowMeta.map((r) => {
       const h = r.el.offsetHeight;
       const top = cum;
       cum += h;
-      return { top, height: h, isMergeStart: r.isMergeStart, mergeKey: r.mergeKey };
+      return { top, height: h, isMergeStart: r.isMergeStart, mergeKey: r.mergeKey, codeLabel: r.codeLabel };
     });
+    catData.push({ cat: c.cat, theadCanvas, bodyCanvas, bodyScale, theadHeightPx: c.theadEl.offsetHeight, rows });
+  }
 
-    const theadHeightPx = theadEl.offsetHeight;
-    const availableBodyPxFirstPage = pageHeightPx - theadHeightPx;
+  // ===== تخطيط الصفحات: مؤشر ارتفاع واحد (curY) بيتراكم عبر كل الأقسام والصفوف على التوالي =====
+  const pages = [];
+  let currentOps = [];
+  let curY = 0;
+  const pushOp = (op, h) => { currentOps.push({ ...op, h }); curY += h; };
+  const newPage = () => { if (currentOps.length) pages.push(currentOps); currentOps = []; curY = 0; };
 
-    // نقسّم الصفوف لصفحات: أي صف يتخطى المساحة المتاحة يبدأ صفحة جديدة (القطع دايمًا على حدود صف، أبدًا في نصه)
-    const pages = [];
-    let pageStart = 0;
-    let usedH = 0;
-    for (let i = 0; i < rowBounds.length; i++) {
-      const rh = rowBounds[i].height;
-      if (usedH > 0 && usedH + rh > availableBodyPxFirstPage) {
-        pages.push({ start: pageStart, end: i });
-        pageStart = i;
-        usedH = 0;
+  const letterheadHpx = letterheadEl.offsetHeight;
+  pushOp({ type: "image", canvas: letterheadCanvas }, letterheadHpx);
+
+  for (const c of catData) {
+    const firstRowH = c.rows[0] ? c.rows[0].height : 0;
+    if (curY > 0 && curY + c.theadHeightPx + firstRowH > pageHeightPx) newPage();
+    pushOp({ type: "image", canvas: c.theadCanvas }, c.theadHeightPx);
+    let firstOnPage = true;
+
+    for (const row of c.rows) {
+      let needsLabel = firstOnPage && !row.isMergeStart && !!row.mergeKey;
+      let rowH = row.height + (needsLabel ? LABEL_H_PX : 0);
+
+      if (curY > 0 && curY + rowH > pageHeightPx) {
+        newPage();
+        pushOp({ type: "image", canvas: c.theadCanvas }, c.theadHeightPx);
+        firstOnPage = true;
+        needsLabel = !row.isMergeStart && !!row.mergeKey;
+        rowH = row.height + (needsLabel ? LABEL_H_PX : 0);
       }
-      usedH += rh;
-    }
-    pages.push({ start: pageStart, end: rowBounds.length });
-
-    for (const pg of pages) {
-      if (!firstPage) pdf.addPage();
-      firstPage = false;
-
-      const sliceTopPx = rowBounds[pg.start].top;
-      const sliceBottomPx = rowBounds[pg.end - 1].top + rowBounds[pg.end - 1].height;
-      const sliceHeightPx = sliceBottomPx - sliceTopPx;
-      const needsContinuationLabel = !rowBounds[pg.start].isMergeStart && rowBounds[pg.start].mergeKey && rowMeta[pg.start].codeLabel;
-      const labelBandPx = needsContinuationLabel ? 40 : 0;
-
-      // كانفاس مؤقت: الترويسة فوق، وتحتها لابل "تابع الكود" لو محتاج، وتحتهم قصة من صورة الجدول
-      const pageCanvas = document.createElement("canvas");
-      pageCanvas.width = bodyCanvas.width;
-      pageCanvas.height = theadCanvas.height + labelBandPx * canvasScale + sliceHeightPx * canvasScale;
-      const ctx = pageCanvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-      ctx.drawImage(theadCanvas, 0, 0, theadCanvas.width, theadCanvas.height, 0, 0, pageCanvas.width, theadCanvas.height);
-
-      let bodyDrawY = theadCanvas.height;
-      if (needsContinuationLabel) {
-        ctx.save();
-        ctx.fillStyle = "#F3EEDD";
-        ctx.fillRect(0, bodyDrawY, pageCanvas.width, labelBandPx * canvasScale);
-        ctx.fillStyle = "#101A2E";
-        ctx.font = `bold ${20 * canvasScale}px Cairo, Arial, sans-serif`;
-        ctx.textAlign = "center";
-        ctx.direction = "rtl";
-        ctx.fillText(`تابع كود المعدة: ${rowMeta[pg.start].codeLabel}`, pageCanvas.width / 2, bodyDrawY + 26 * canvasScale);
-        ctx.restore();
-        bodyDrawY += labelBandPx * canvasScale;
-      }
-
-      ctx.drawImage(
-        bodyCanvas,
-        0, sliceTopPx * canvasScale, bodyCanvas.width, sliceHeightPx * canvasScale,
-        0, bodyDrawY, pageCanvas.width, sliceHeightPx * canvasScale
-      );
-
-      const imgData = pageCanvas.toDataURL("image/png");
-      const imgHmm = (pageCanvas.height / canvasScale) * mmPerPx;
-      pdf.addImage(imgData, "PNG", pageMarginMM, pageMarginMM, contentWmm, imgHmm);
+      pushOp({ type: "row", bodyCanvas: c.bodyCanvas, bodyScale: c.bodyScale, sliceTop: row.top, sliceHeight: row.height, label: needsLabel ? row.codeLabel : null }, rowH);
+      firstOnPage = false;
     }
   }
+
+  if (totalsCanvas) {
+    const h = totalsEl.offsetHeight;
+    if (curY > 0 && curY + h > pageHeightPx) newPage();
+    pushOp({ type: "image", canvas: totalsCanvas }, h);
+  }
+  if (signaturesCanvas) {
+    const h = signaturesEl.offsetHeight;
+    if (curY > 0 && curY + h > pageHeightPx) newPage();
+    pushOp({ type: "image", canvas: signaturesCanvas }, h);
+  }
+  newPage();
+
+  // ===== رسم كل صفحة في كانفاس واحد وإضافتها كصفحة PDF =====
+  const pdf = new jsPDF("p", "mm", "a4");
+  pages.forEach((ops, pageIdx) => {
+    if (pageIdx > 0) pdf.addPage();
+    const canvasWidthPx = Math.round(containerWidthPx * CAPTURE_SCALE);
+    const totalHpx = ops.reduce((s, o) => s + o.h, 0);
+    const pageCanvas = document.createElement("canvas");
+    pageCanvas.width = canvasWidthPx;
+    pageCanvas.height = Math.max(1, Math.round(totalHpx * CAPTURE_SCALE));
+    const ctx = pageCanvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+
+    let y = 0;
+    ops.forEach((op) => {
+      const hCanvasPx = op.h * CAPTURE_SCALE;
+      if (op.type === "image") {
+        ctx.drawImage(op.canvas, 0, 0, op.canvas.width, op.canvas.height, 0, y, canvasWidthPx, hCanvasPx);
+        y += hCanvasPx;
+      } else if (op.type === "row") {
+        let drawY = y;
+        if (op.label) {
+          ctx.save();
+          ctx.fillStyle = "#F3EEDD";
+          ctx.fillRect(0, drawY, canvasWidthPx, LABEL_H_PX * CAPTURE_SCALE);
+          ctx.fillStyle = "#101A2E";
+          ctx.font = `bold ${18 * CAPTURE_SCALE}px Cairo, Arial, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.direction = "rtl";
+          ctx.fillText(`تابع — كود المعدة: ${op.label}`, canvasWidthPx / 2, drawY + 23 * CAPTURE_SCALE);
+          ctx.restore();
+          drawY += LABEL_H_PX * CAPTURE_SCALE;
+        }
+        ctx.drawImage(
+          op.bodyCanvas,
+          0, op.sliceTop * op.bodyScale, op.bodyCanvas.width, op.sliceHeight * op.bodyScale,
+          0, drawY, canvasWidthPx, op.sliceHeight * CAPTURE_SCALE
+        );
+        y += hCanvasPx;
+      }
+    });
+
+    const imgData = pageCanvas.toDataURL("image/jpeg", 0.85);
+    const imgHmm = (pageCanvas.height / CAPTURE_SCALE) * mmPerPx;
+    pdf.addImage(imgData, "JPEG", pageMarginMM, pageMarginMM, contentWmm, imgHmm);
+  });
 
   pdf.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
 }
@@ -6580,8 +6610,11 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const [custodyId, setCustodyId] = useState(custodies[0]?.id || "");
   const [pdfLoading, setPdfLoading] = useState(false);
   const printRef = useRef(null);
+  const letterheadRef = useRef(null);
   const theadRefs = useRef({});
   const rowRefs = useRef({});
+  const totalsRef = useRef(null);
+  const signaturesRef = useRef(null);
   const custody = custodies.find((c) => c.id === custodyId);
   const items = expenses.filter((e) => e.custodyId === custodyId);
   const totals = custodyTotals[custodyId] || { spent: 0, available: 0, remaining: 0 };
@@ -6603,7 +6636,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   };
 
   // دمج بصري طبيعي (rowSpan) لبنود نفس المعدة — من غير أي تقسيم صفحات يدوي هنا؛
-  // تقسيم الصفحات بقى شغل exportTablesToPaginatedPDF وقت التصدير، مش وقت العرض.
+  // تقسيم الصفحات بقى شغل exportCustodyPDF وقت التصدير، مش وقت العرض.
   const withMergeInfo = (rows) => {
     const result = [];
     let i = 0;
@@ -6647,11 +6680,12 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const handlePdfExport = async () => {
     setPdfLoading(true);
     try {
-      const tables = grouped.map((g) => {
+      const categories = grouped.map((g) => {
         const els = rowRefs.current[g.cat] || [];
         return {
+          cat: g.cat,
           theadEl: theadRefs.current[g.cat],
-          tbodyEl: els.length ? els[0].closest("tbody") : null,
+          tbodyEl: els.length ? els[0]?.closest("tbody") : null,
           rowMeta: g.rows.map((row, idx) => ({
             el: els[idx],
             isMergeStart: row._mergeStart,
@@ -6660,7 +6694,13 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           })),
         };
       }).filter((t) => t.tbodyEl);
-      await exportTablesToPaginatedPDF({ tables, filename: `${custody?.label || "عهدة"}_${todayISO()}` });
+      await exportCustodyPDF({
+        letterheadEl: letterheadRef.current,
+        categories,
+        totalsEl: totalsRef.current,
+        signaturesEl: signaturesRef.current,
+        filename: `${custody?.label || "عهدة"}_${todayISO()}`,
+      });
     } catch (err) {
       console.error(err);
       window.alert("حصلت مشكلة أثناء تجهيز الـ PDF — جرب تاني، أو استخدم زر الطباعة العادي.");
@@ -6707,6 +6747,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
       {custody && (
         <div id="print-area" ref={printRef} className="bg-white border rounded-2xl p-6 text-xs" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
+          <div ref={letterheadRef}>
           <div className="flex items-center justify-between border-b-2 pb-3 mb-3" style={{ borderColor: "#101A2E" }}>
             <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 40, objectFit: "contain" }} />
             <div className="text-center">
@@ -6732,6 +6773,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                 <div className="font-extrabold tabular-nums" style={{ color: Number(val) < 0 ? "#E0796C" : "#FFFFFF" }}>{fmtMoney(val)}</div>
               </div>
             ))}
+          </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -6789,7 +6831,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               </tbody>
             </table>
           ))}
-          <div className="totals-signatures-block">
+          <div className="totals-signatures-block" ref={totalsRef}>
           <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
             <colgroup>
               <col style={{ width: "3%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
@@ -6809,19 +6851,19 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           </div>
           </div>
 
-          <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4">
+          <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-4 pt-4" ref={signaturesRef}>
             {SIGNATURES.map((s) => (
               <div key={s} className="text-center">
                 <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
                 <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>التوقيع / {s}</div>
               </div>
             ))}
+            {userEmail && (
+              <div className="col-span-4 text-center mt-2 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
+                طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span> — بتاريخ {printedAt}
+              </div>
+            )}
           </div>
-          {userEmail && (
-            <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
-              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span> — بتاريخ {printedAt}
-            </div>
-          )}
         </div>
       )}
     </div>
