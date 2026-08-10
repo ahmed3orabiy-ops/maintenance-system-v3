@@ -755,6 +755,7 @@ export default function App() {
   const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
   const [claims, saveClaims, claimsLoaded] = useStorage("claims", []);
   const [claimDeductions, saveClaimDeductions, claimDeductionsLoaded] = useStorage("claimDeductions", []);
+  const [vehicleMissions, saveVehicleMissions, vehicleMissionsLoaded] = useStorage("vehicleMissions", []);
   const [octaneTopUps, saveOctaneTopUps, octaneTopUpsLoaded] = useStorage("octaneTopUps", []);
   const [bankTransactions, saveBankTransactions, bankTransactionsLoaded] = useStorage("bankTransactions", []);
   // "الإيرادات" اتلغت كإدخال يدوي — بقى إيراد كل معدة بيتحسب مباشرة من المستخلصات (claims) عشان يفضل مصدر واحد للحقيقة
@@ -815,6 +816,7 @@ export default function App() {
     fuelRecords: saveFuelRecords, oilRecords: saveOilRecords, equipmentCodes: saveEquipmentCodes, salaries: saveSalaries,
     accounts: saveAccounts, manualJournalEntries: saveManualJournalEntries, fiscalClosings: saveFiscalClosings,
     claimDeductions: saveClaimDeductions, octaneTopUps: saveOctaneTopUps, claims: saveClaims, bankTransactions: saveBankTransactions,
+    vehicleMissions: saveVehicleMissions,
   };
   const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
   const pushUndoMulti = (entries) => setLastAction(entries);
@@ -1226,8 +1228,9 @@ export default function App() {
     const monthlyRate = Number(c.monthlyRate) || 0;
     const hourlyRate = monthlyRate / 196;
     const hoursWorked = Number(c.hoursWorked) || 0;
-    saveClaims([...claims, { ...c, hourlyRate, total: hourlyRate * hoursWorked, id: uid() }]);
-    logAudit("إضافة", "مستخلص", `${c.owner || ""} — ${c.equipmentCode || "بند مستخلص"} — ${c.claimMonth || ""}`);
+    const claimMonth = (c.periodFrom || "").slice(0, 7);
+    saveClaims([...claims, { ...c, claimMonth, hourlyRate, total: hourlyRate * hoursWorked, id: uid() }]);
+    logAudit("إضافة", "مستخلص", `${c.owner || ""} — ${c.equipmentCode || "بند مستخلص"} — ${c.periodFrom || ""}`);
     showToast("تم حفظ بند المستخلص");
   };
   const updateClaim = (id, updates) => {
@@ -1236,7 +1239,8 @@ export default function App() {
     const monthlyRate = Number(updates.monthlyRate) || 0;
     const hourlyRate = monthlyRate / 196;
     const hoursWorked = Number(updates.hoursWorked) || 0;
-    saveClaims(claims.map((c) => (c.id === id ? { ...c, ...updates, hourlyRate, total: hourlyRate * hoursWorked } : c)));
+    const claimMonth = (updates.periodFrom || "").slice(0, 7);
+    saveClaims(claims.map((c) => (c.id === id ? { ...c, ...updates, claimMonth, hourlyRate, total: hourlyRate * hoursWorked } : c)));
     logAudit("تعديل", "مستخلص", c0 ? c0.equipmentCode : id);
     showToast("تم تعديل بند المستخلص");
   };
@@ -1246,6 +1250,28 @@ export default function App() {
     saveClaims(claims.filter((c) => c.id !== id));
     logAudit("حذف", "مستخلص", c0 ? c0.equipmentCode : id);
     showToast("تم حذف بند المستخلص", "danger");
+  };
+
+  /* ============ مأموريات السيارات ============ */
+  const addVehicleMission = (m) => {
+    pushUndo("vehicleMissions", vehicleMissions);
+    const total = (Number(m.transportCost) || 0) + (Number(m.cardsScalesFees) || 0);
+    saveVehicleMissions([...vehicleMissions, { ...m, total, id: uid() }]);
+    logAudit("إضافة", "مأمورية سيارة", `${m.vehicleNumber || ""} — ${m.missionNature || ""} — ${fmtMoney(total)}`);
+    showToast("تم حفظ المأمورية");
+  };
+  const updateVehicleMission = (id, updates) => {
+    pushUndo("vehicleMissions", vehicleMissions);
+    const total = (Number(updates.transportCost) || 0) + (Number(updates.cardsScalesFees) || 0);
+    saveVehicleMissions(vehicleMissions.map((m) => (m.id === id ? { ...m, ...updates, total } : m)));
+    logAudit("تعديل", "مأمورية سيارة", id);
+    showToast("تم تعديل المأمورية");
+  };
+  const deleteVehicleMission = (id) => {
+    pushUndo("vehicleMissions", vehicleMissions);
+    saveVehicleMissions(vehicleMissions.filter((m) => m.id !== id));
+    logAudit("حذف", "مأمورية سيارة", id);
+    showToast("تم حذف المأمورية", "danger");
   };
 
   /* ============ خصومات المستخلص (مرتبات/سلف/سولار تدفعه الشركة وتخصمه) ============ */
@@ -1324,7 +1350,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded || !vehicleMissionsLoaded;
 
   const NAV_GROUPS = [
     {
@@ -1615,7 +1641,7 @@ export default function App() {
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
-            {view === "claims" && <ClaimsView claims={claims} claimDeductions={claimDeductions} equipmentCodes={equipmentCodes} expenses={expenses} onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim} onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction} />}
+            {view === "claims" && <ClaimsView claims={claims} claimDeductions={claimDeductions} vehicleMissions={vehicleMissions} equipmentCodes={equipmentCodes} expenses={expenses} onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim} onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction} onAddMission={addVehicleMission} onUpdateMission={updateVehicleMission} onDeleteMission={deleteVehicleMission} />}
             {view === "departmentBank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={addBankTransaction} onDelete={deleteBankTransaction} />}
             {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
@@ -5924,7 +5950,7 @@ function claimTypesFor(sources) {
   ];
 }
 
-function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddClaim, onUpdateClaim, onDeleteClaim, onAddDeduction, onUpdateDeduction, onDeleteDeduction }) {
+function ClaimsView({ claims, claimDeductions, vehicleMissions, equipmentCodes, expenses, onAddClaim, onUpdateClaim, onDeleteClaim, onAddDeduction, onUpdateDeduction, onDeleteDeduction, onAddMission, onUpdateMission, onDeleteMission }) {
   const CLAIM_TYPES = useMemo(() => claimTypesFor(SOURCES), []);
   const [activeTypeKey, setActiveTypeKey] = useState(CLAIM_TYPES[0].key);
   const activeType = CLAIM_TYPES.find((t) => t.key === activeTypeKey) || CLAIM_TYPES[0];
@@ -5932,7 +5958,7 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const emptyEntitlement = { claimMonth: todayISO().slice(0, 7), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
+  const emptyEntitlement = { periodFrom: todayISO(), periodTo: todayISO(), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
   const [form, setForm] = useState(emptyEntitlement);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -5941,6 +5967,12 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
   const emptyDeduction = { claimMonth: todayISO().slice(0, 7), type: CLAIM_DEDUCTION_TYPES[0], description: "", amount: "" };
   const [dedForm, setDedForm] = useState(emptyDeduction);
   const setDed = (k) => (e) => setDedForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const [showMissionForm, setShowMissionForm] = useState(false);
+  const [editingMissionId, setEditingMissionId] = useState(null);
+  const emptyMission = { date: todayISO(), vehicleNumber: "", vehicleType: "", missionNature: "", from: "", to: "", transportCost: "", cardsScalesFees: "" };
+  const [missionForm, setMissionForm] = useState(emptyMission);
+  const setMission = (k) => (e) => setMissionForm((f) => ({ ...f, [k]: e.target.value }));
 
   const knownLocations = useMemo(() => {
     const s = new Set();
@@ -5957,20 +5989,24 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
 
   const typeClaims = useMemo(() => claims.filter((c) => (c.owner || SOURCES[0]) === activeType.owner && (c.equipmentOwner || c.owner || SOURCES[0]) === activeType.equipmentOwner), [claims, activeType]);
   const typeDeductions = useMemo(() => claimDeductions.filter((d) => d.owner === activeType.owner && (d.equipmentOwner || d.owner) === activeType.equipmentOwner), [claimDeductions, activeType]);
+  const typeMissions = useMemo(() => vehicleMissions.filter((m) => m.owner === activeType.owner && (m.equipmentOwner || m.owner) === activeType.equipmentOwner), [vehicleMissions, activeType]);
 
-  const months = useMemo(() => [...new Set([...typeClaims.map((c) => c.claimMonth), ...typeDeductions.map((d) => d.claimMonth)])].filter(Boolean).sort().reverse(), [typeClaims, typeDeductions]);
+  const months = useMemo(() => [...new Set([...typeClaims.map((c) => c.claimMonth), ...typeDeductions.map((d) => d.claimMonth), ...typeMissions.map((m) => (m.date || "").slice(0, 7))])].filter(Boolean).sort().reverse(), [typeClaims, typeDeductions, typeMissions]);
 
-  const list = typeClaims.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
+  const list = typeClaims.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.periodFrom || "").localeCompare(a.periodFrom || ""));
   const dedList = typeDeductions.filter((d) => activeMonth === "الكل" || d.claimMonth === activeMonth);
+  const missionList = typeMissions.filter((m) => activeMonth === "الكل" || (m.date || "").slice(0, 7) === activeMonth).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-  const gross = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const equipmentGross = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const missionsGross = missionList.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const gross = equipmentGross + missionsGross;
   const dedTotal = dedList.reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const net = gross - dedTotal;
 
-  const startAdd = () => { setEditingId(null); setForm({ ...emptyEntitlement, claimMonth: activeMonth !== "الكل" ? activeMonth : emptyEntitlement.claimMonth }); setShowForm(true); };
+  const startAdd = () => { setEditingId(null); setForm({ ...emptyEntitlement, periodFrom: activeMonth !== "الكل" ? `${activeMonth}-01` : emptyEntitlement.periodFrom }); setShowForm(true); };
   const startEdit = (c) => {
     setEditingId(c.id);
-    setForm({ claimMonth: c.claimMonth || todayISO().slice(0, 7), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
+    setForm({ periodFrom: c.periodFrom || (c.claimMonth ? `${c.claimMonth}-01` : todayISO()), periodTo: c.periodTo || c.periodFrom || todayISO(), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
     setShowForm(true);
   };
   const cancel = () => { setShowForm(false); setEditingId(null); setForm(emptyEntitlement); };
@@ -5990,6 +6026,21 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
     if (editingDedId) onUpdateDeduction(editingDedId, payload); else onAddDeduction(payload);
     cancelDed();
   };
+
+  const startAddMission = () => { setEditingMissionId(null); setMissionForm({ ...emptyMission, date: activeMonth !== "الكل" ? `${activeMonth}-01` : emptyMission.date }); setShowMissionForm(true); };
+  const startEditMission = (m) => {
+    setEditingMissionId(m.id);
+    setMissionForm({ date: m.date || todayISO(), vehicleNumber: m.vehicleNumber || "", vehicleType: m.vehicleType || "", missionNature: m.missionNature || "", from: m.from || "", to: m.to || "", transportCost: m.transportCost ?? "", cardsScalesFees: m.cardsScalesFees ?? "" });
+    setShowMissionForm(true);
+  };
+  const cancelMission = () => { setShowMissionForm(false); setEditingMissionId(null); setMissionForm(emptyMission); };
+  const submitMission = (e) => {
+    e.preventDefault();
+    const payload = { ...missionForm, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
+    if (editingMissionId) onUpdateMission(editingMissionId, payload); else onAddMission(payload);
+    cancelMission();
+  };
+  const missionTotalPreview = (Number(missionForm.transportCost) || 0) + (Number(missionForm.cardsScalesFees) || 0);
 
   const hourlyPreview = (Number(form.monthlyRate) || 0) / 196;
   const totalPreview = hourlyPreview * (Number(form.hoursWorked) || 0);
@@ -6050,7 +6101,8 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
             </div>
             <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="شهر المستخلص" required><TextInput type="month" value={form.claimMonth} onChange={set("claimMonth")} required /></Field>
+              <Field label="الفترة من" required><TextInput type="date" value={form.periodFrom} onChange={set("periodFrom")} required /></Field>
+              <Field label="الفترة إلى" required><TextInput type="date" value={form.periodTo} onChange={set("periodTo")} required /></Field>
               <Field label="كود المعدة" required>
                 <TextInput list="claim-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
                 <datalist id="claim-codes">{equipmentCodes.filter((c) => c.owner === activeType.equipmentOwner).map((c) => <option key={c.id} value={c.code} />)}</datalist>
@@ -6101,6 +6153,36 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
         </div>
       )}
 
+      {showMissionForm && (
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submitMission} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingMissionId ? "تعديل مأمورية" : "مأمورية جديدة"}</h3>
+              <button type="button" onClick={cancelMission} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
+            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="التاريخ" required><TextInput type="date" value={missionForm.date} onChange={setMission("date")} required /></Field>
+              <Field label="رقم السيارة" required><TextInput value={missionForm.vehicleNumber} onChange={setMission("vehicleNumber")} required placeholder="مثال: ط ط ق 3742" /></Field>
+              <Field label="النوع"><TextInput value={missionForm.vehicleType} onChange={setMission("vehicleType")} placeholder="مثال: جامبو نقل" /></Field>
+              <div className="md:col-span-3"><Field label="طبيعة المأمورية"><TextInput value={missionForm.missionNature} onChange={setMission("missionNature")} placeholder="مثال: نقل حديد" /></Field></div>
+              <Field label="من"><TextInput value={missionForm.from} onChange={setMission("from")} placeholder="نقطة الانطلاق" /></Field>
+              <Field label="إلى"><TextInput value={missionForm.to} onChange={setMission("to")} placeholder="نقطة الوصول" /></Field>
+              <div />
+              <Field label="تكلفة النقل" required><TextInput type="number" step="0.01" value={missionForm.transportCost} onChange={setMission("transportCost")} required placeholder="0" /></Field>
+              <Field label="رسوم الكارتات والموازين"><TextInput type="number" step="0.01" value={missionForm.cardsScalesFees} onChange={setMission("cardsScalesFees")} placeholder="0" /></Field>
+            </div>
+            <div className="mt-4 text-sm" style={{ color: COLORS.slate }}>
+              الإجمالي: <b style={{ color: COLORS.ink }}>{fmtMoney(missionTotalPreview)}</b>
+            </div>
+            <div className="flex justify-end gap-3 mt-4 pt-2">
+              <button type="button" onClick={cancelMission} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingMissionId ? "حفظ التعديل" : "حفظ المأمورية"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div id="print-area">
         <PrintLetterhead />
 
@@ -6125,7 +6207,7 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
         </div>
 
         <SectionCard
-          title={`الاستحقاقات — ${activeType.label} (${list.length}) — ${fmtMoney(gross)}`}
+          title={`الاستحقاقات — ${activeType.label} (${list.length}) — ${fmtMoney(equipmentGross)}`}
           action={<button onClick={startAdd} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> بند استحقاق جديد</button>}
         >
           {list.length === 0 ? (
@@ -6135,7 +6217,7 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
+                    {["الفترة", "كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
                       <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
                     ))}
                   </tr>
@@ -6143,6 +6225,7 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
                 <tbody>
                   {list.map((c) => (
                     <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-xs">{c.periodFrom || "—"} → {c.periodTo || "—"}</td>
                       <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
                       <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
@@ -6154,6 +6237,48 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
                         <div className="flex items-center gap-1">
                           <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
                           <button onClick={() => onDeleteClaim(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title={`مأموريات السيارات (${missionList.length}) — ${fmtMoney(missionsGross)}`}
+          action={<button onClick={startAddMission} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مأمورية جديدة</button>}
+        >
+          {missionList.length === 0 ? (
+            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد مأموريات مطابقة</div>
+          ) : (
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["التاريخ", "رقم السيارة", "النوع", "طبيعة المأمورية", "من", "إلى", "تكلفة النقل", "رسوم الكارتات والموازين", "الإجمالي", ""].map((h) => (
+                      <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {missionList.map((m) => (
+                    <tr key={m.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{m.date}</td>
+                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{m.vehicleNumber}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{m.vehicleType || "—"}</td>
+                      <td className="px-3 py-2.5">{m.missionNature || "—"}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{m.from || "—"}</td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{m.to || "—"}</td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.transportCost)}</td>
+                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.cardsScalesFees)}</td>
+                      <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(m.total)}</td>
+                      <td className="px-3 py-2.5 no-print">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => startEditMission(m)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                          <button onClick={() => onDeleteMission(m.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>
