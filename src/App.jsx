@@ -9,7 +9,6 @@ import {
   Search, Trash2, X, Plus, ChevronLeft, TrendingUp, TrendingDown,
   Building2, Fuel, ClipboardList, CheckCircle2, UploadCloud, FileSpreadsheet,
   MapPin, BarChart3, Filter, ShieldCheck, Loader2, Printer, ArrowLeft, Sparkles, Pencil, ListChecks, Menu, Sun, Moon,
-  BookOpen, Scale,
 } from "lucide-react";
 import { db, auth } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
@@ -76,278 +75,6 @@ const CATEGORIES = [
 ];
 const PAYMENT_METHODS = ["نقدي من العهدة", "تحويل بنكي", "شيك"];
 const CHART_COLORS = ["#101A2E", "#C69A3C", "#5B7A9E", "#8B9C6E", "#B5453A", "#647085"];
-
-/* ============================================================
-   المحاسبة — دليل الحسابات + محرك القيود المزدوجة التلقائي
-   ============================================================
-   الفكرة: مفيش "إدخال قيد" يدوي. كل عملية موجودة أصلاً في النظام
-   (تحويل عهدة، بند صرف، بند إيراد) بتتحول تلقائيًا لقيد مزدوج (مدين/دائن)
-   وقت العرض بس — من غير ما نلمس أو نغيّر بيانات العهد/المصروفات/الإيرادات
-   الأصلية. فلو عدّلت أو حذفت بند صرف عادي زي ما انت متعود، القيود بتتحدث
-   تلقائيًا لوحدها من غير أي تدخل.
-============================================================ */
-const ACCOUNT_TYPE_LABELS = { asset: "أصول", liability: "خصوم", equity: "حقوق ملكية", revenue: "إيرادات", expense: "مصروفات" };
-
-const CHART_OF_ACCOUNTS = [
-  { code: "1010", name: "بنك القسم (صيانة وتشغيل)", type: "asset" },
-  { code: "1100", name: "عهدة تحت التصفية", type: "asset" },
-  { code: "1150", name: "محفظة أوكتين (سولار)", type: "asset" },
-  { code: "1200", name: "إيرادات تأجير مستحقة (مستخلصات)", type: "asset" },
-  { code: "4000", name: "إيراد تأجير معدات", type: "revenue" },
-  { code: "5100", name: "مصروفات صيانة وتشغيل السيارات", type: "expense" },
-  { code: "5200", name: "مصروفات صيانة المعدات", type: "expense" },
-  { code: "5900", name: "مصروفات أخرى", type: "expense" },
-  { code: "5950", name: "خصومات مستخلص (مرتبات وسلف مدفوعة من الشركة)", type: "expense" },
-  { code: "3000", name: "صافي نتيجة القسم (أرباح/خسائر مرحّلة)", type: "equity" },
-];
-const ACCOUNT_BY_CODE = Object.fromEntries(CHART_OF_ACCOUNTS.map((a) => [a.code, a]));
-
-// تحويل تصنيف المصروف (CATEGORIES) لحساب مصروفات مناسب في دليل الحسابات
-const EXPENSE_ACCOUNT_BY_CATEGORY = {
-  "أولاً - مصروفات السيارات": "5100",
-  "ثانياً - صيانة المعدات": "5200",
-  "خامساً - مصروفات أخرى": "5900",
-};
-const expenseAccountForCategory = (cat, accountsList) => {
-  const preferred = EXPENSE_ACCOUNT_BY_CATEGORY[cat] || "5900";
-  if (!accountsList || !accountsList.length) return preferred;
-  if (accountsList.some((a) => a.code === preferred)) return preferred;
-  const fallback = accountsList.find((a) => a.type === "expense");
-  return fallback ? fallback.code : preferred;
-};
-
-// بيبني كل القيود المزدوجة من بيانات النظام الحالية
-// المسار الحقيقي: مستخلص (إيراد) → خصومات الشركة (مرتبات/سلف) → الصافي بيدخل بنك القسم →
-// عهدة نقدية تتسحب من بنك القسم → تتصرف على المعدات. + محفظة أوكتين: شحن من بنك القسم، واستهلاك سولار منها.
-// كل قيد = { id, date, ref, desc, equipmentCode, source, lines:[{account, debit, credit}] }
-function buildJournalEntries({
-  custodies = [], expenses = [], claims = [], claimDeductions = [], octaneTopUps = [],
-  fuelRecords = [], equipmentCodes = [], accounts: accountsList = CHART_OF_ACCOUNTS,
-}) {
-  const entries = [];
-  const custodyById = Object.fromEntries((custodies || []).map((c) => [c.id, c]));
-  const ownerByCode = {};
-  (equipmentCodes || []).forEach((c) => { if (c.code) ownerByCode[normCode(c.code)] = c.owner; });
-
-  // 1) كل بند مستخلص (سطر معدة في شهر معيّن) → مدين "إيرادات تأجير مستحقة" / دائن "إيراد تأجير معدات"
-  (claims || []).forEach((c) => {
-    const amt = Number(c.total) || 0;
-    if (amt <= 0) return;
-    entries.push({
-      id: `claim-${c.id}`, date: c.claimMonth ? `${c.claimMonth}-15` : "", ref: c.equipmentCode || "",
-      desc: `مستخلص ${c.owner || ""} — ${c.equipmentCode || ""} (${c.claimMonth || ""})`,
-      equipmentCode: c.equipmentCode || "", source: c.owner || "",
-      lines: [{ account: "1200", debit: amt, credit: 0 }, { account: "4000", debit: 0, credit: amt }],
-    });
-  });
-
-  // 2) خصم من المستخلص (مرتب/سلفة/سولار دفعته الشركة) → مدين "خصومات مستخلص" / دائن "إيرادات تأجير مستحقة" (بينقص المستحق)
-  (claimDeductions || []).forEach((d) => {
-    const amt = Number(d.amount) || 0;
-    if (amt <= 0) return;
-    entries.push({
-      id: `claimded-${d.id}`, date: d.claimMonth ? `${d.claimMonth}-20` : "", ref: d.type || "خصم",
-      desc: `خصم مستخلص ${d.owner || ""} — ${d.type || ""} — ${d.description || ""}`,
-      equipmentCode: "", source: d.owner || "",
-      lines: [{ account: "5950", debit: amt, credit: 0 }, { account: "1200", debit: 0, credit: amt }],
-    });
-  });
-
-  // 3) الصافي المُستحق لكل نوع مستخلص (مالك المعدة + الجهة الشغالة عندها) في الشهر = إجمالي الاستحقاقات ناقص الاستقطاعات
-  const claimGroups = {};
-  (claims || []).forEach((c) => {
-    if (!c.owner || !c.claimMonth) return;
-    const eqOwner = c.equipmentOwner || c.owner;
-    const k = `${c.owner}|||${eqOwner}|||${c.claimMonth}`;
-    claimGroups[k] = (claimGroups[k] || 0) + (Number(c.total) || 0);
-  });
-  (claimDeductions || []).forEach((d) => {
-    if (!d.owner || !d.claimMonth) return;
-    const eqOwner = d.equipmentOwner || d.owner;
-    const k = `${d.owner}|||${eqOwner}|||${d.claimMonth}`;
-    claimGroups[k] = (claimGroups[k] || 0) - (Number(d.amount) || 0);
-  });
-  Object.entries(claimGroups).forEach(([k, net]) => {
-    if (net <= 0) return;
-    const [owner, eqOwner, claimMonth] = k.split("|||");
-    entries.push({
-      id: `claimnet-${k}`, date: `${claimMonth}-25`, ref: "صافي مستخلص مستحق",
-      desc: `صافي مستخلص (معدات ${eqOwner} لدى ${owner}) — ${claimMonth}`, equipmentCode: "", source: owner,
-      lines: [{ account: "1010", debit: net, credit: 0 }, { account: "1200", debit: 0, credit: net }],
-    });
-  });
-
-  // 4) تحويل عهدة من بنك القسم → مدين "عهدة تحت التصفية" / دائن "بنك القسم"
-  (custodies || []).forEach((c) => {
-    const amt = Number(c.transfersIn) || 0;
-    if (amt <= 0) return;
-    entries.push({
-      id: `custody-${c.id}`, date: c.periodFrom || "", ref: c.label || "تحويل عهدة",
-      desc: `تحويل عهدة إلى ${c.source || ""} — ${c.label || ""}`, equipmentCode: "", source: c.source || "",
-      lines: [{ account: "1100", debit: amt, credit: 0 }, { account: "1010", debit: 0, credit: amt }],
-    });
-  });
-
-  // 5) كل بند صرف من العهدة → مدين حساب المصروف (حسب التصنيف) / دائن "عهدة تحت التصفية"
-  (expenses || []).forEach((e) => {
-    const amt = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
-    if (amt <= 0) return;
-    const custody = custodyById[e.custodyId];
-    const acc = expenseAccountForCategory(e.category, accountsList);
-    entries.push({
-      id: `expense-${e.id}`, date: e.date || "", ref: e.equipmentCode || "", desc: e.purpose || e.category || "بند صرف",
-      equipmentCode: e.equipmentCode || "", source: custody?.source || e.source || "",
-      lines: [{ account: acc, debit: amt, credit: 0 }, { account: "1100", debit: 0, credit: amt }],
-    });
-  });
-
-  // 6) شحن محفظة أوكتين (مجمّعة واحدة، بتتسوّى لاحقًا يدويًا في بنك القسم) → مدين "محفظة أوكتين" / دائن "بنك القسم"
-  (octaneTopUps || []).forEach((t) => {
-    const amt = Number(t.amount) || 0;
-    if (amt <= 0) return;
-    entries.push({
-      id: `octanetop-${t.id}`, date: t.date || "", ref: "شحن محفظة أوكتين",
-      desc: `شحن محفظة أوكتين${t.notes ? " — " + t.notes : ""}`, equipmentCode: "", source: "",
-      lines: [{ account: "1150", debit: amt, credit: 0 }, { account: "1010", debit: 0, credit: amt }],
-    });
-  });
-
-  // 7) استهلاك سولار فعلي من محفظة أوكتين → مدين "مصروفات صيانة وتشغيل السيارات" / دائن "محفظة أوكتين"
-  (fuelRecords || []).forEach((r) => {
-    const amt = Number(r.total) || 0;
-    if (amt <= 0) return;
-    const owner = ownerByCode[normCode(r.code)] || "";
-    entries.push({
-      id: `fuel-${r.id}`, date: r.date || "", ref: r.code || "", desc: `سولار — ${r.code || ""}`,
-      equipmentCode: r.code || "", source: owner,
-      lines: [{ account: "5100", debit: amt, credit: 0 }, { account: "1150", debit: 0, credit: amt }],
-    });
-  });
-
-  return entries.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-}
-
-// دفتر الأستاذ: كل حركات حساب معيّن مرتبة بالتاريخ مع رصيد متراكم
-function buildLedgerForAccount(entries, accountCode) {
-  const rows = [];
-  let running = 0;
-  entries.forEach((en) => {
-    en.lines.filter((l) => l.account === accountCode).forEach((l) => {
-      running += (Number(l.debit) || 0) - (Number(l.credit) || 0);
-      rows.push({ date: en.date, desc: en.desc, equipmentCode: en.equipmentCode, debit: l.debit, credit: l.credit, balance: running });
-    });
-  });
-  return rows;
-}
-
-// ميزان المراجعة: إجمالي مدين/دائن/رصيد لكل حساب
-function buildTrialBalance(entries, accountsList) {
-  const list = accountsList && accountsList.length ? accountsList : CHART_OF_ACCOUNTS;
-  const totals = {};
-  list.forEach((a) => { totals[a.code] = { debit: 0, credit: 0 }; });
-  entries.forEach((en) => en.lines.forEach((l) => {
-    if (!totals[l.account]) totals[l.account] = { debit: 0, credit: 0 };
-    totals[l.account].debit += Number(l.debit) || 0;
-    totals[l.account].credit += Number(l.credit) || 0;
-  }));
-  return list.map((a) => {
-    const t = totals[a.code] || { debit: 0, credit: 0 };
-    const balance = t.debit - t.credit;
-    return { ...a, debit: t.debit, credit: t.credit, balance };
-  });
-}
-
-// قائمة الدخل + الربحية لكل كود معدة (المعدة كمركز تكلفة/مشروع)
-function buildIncomeStatement(entries, accountsList) {
-  const list = accountsList && accountsList.length ? accountsList : CHART_OF_ACCOUNTS;
-  const accByCode = Object.fromEntries(list.map((a) => [a.code, a]));
-  const revenueAccountCodes = new Set(list.filter((a) => a.type === "revenue").map((a) => a.code));
-  const revenueTotal = entries.reduce((s, en) => s + en.lines.filter((l) => revenueAccountCodes.has(l.account)).reduce((s2, l) => s2 + (Number(l.credit) || 0) - (Number(l.debit) || 0), 0), 0);
-  const expenseByAccount = {};
-  entries.forEach((en) => en.lines.forEach((l) => {
-    const acc = accByCode[l.account];
-    if (acc && acc.type === "expense") {
-      expenseByAccount[l.account] = (expenseByAccount[l.account] || 0) + (Number(l.debit) || 0) - (Number(l.credit) || 0);
-    }
-  }));
-  const expenseTotal = Object.values(expenseByAccount).reduce((s, v) => s + v, 0);
-
-  const byCode = {};
-  entries.forEach((en) => {
-    const code = en.equipmentCode || "بدون كود / عام";
-    if (!byCode[code]) byCode[code] = { revenue: 0, expense: 0 };
-    en.lines.forEach((l) => {
-      if (revenueAccountCodes.has(l.account)) byCode[code].revenue += (Number(l.credit) || 0) - (Number(l.debit) || 0);
-      const acc = accByCode[l.account];
-      if (acc && acc.type === "expense") byCode[code].expense += (Number(l.debit) || 0) - (Number(l.credit) || 0);
-    });
-  });
-  const byEquipment = Object.entries(byCode)
-    .filter(([, v]) => v.revenue > 0 || v.expense > 0)
-    .map(([code, v]) => ({ code, revenue: v.revenue, expense: v.expense, net: v.revenue - v.expense }))
-    .sort((a, b) => b.net - a.net);
-
-  return {
-    revenueTotal, expenseTotal, net: revenueTotal - expenseTotal,
-    expenseLines: list.filter((a) => a.type === "expense").map((a) => ({ ...a, amount: expenseByAccount[a.code] || 0 })),
-    byEquipment,
-  };
-}
-
-// الميزانية العمومية: الأصول مقابل (الخصوم + حقوق الملكية)
-function buildBalanceSheet(entries, accountsList) {
-  const tb = buildTrialBalance(entries, accountsList);
-  const assets = tb.filter((a) => a.type === "asset");
-  const liabilities = tb.filter((a) => a.type === "liability");
-  const equity = tb.filter((a) => a.type === "equity");
-  const totalAssets = assets.reduce((s, a) => s + a.balance, 0);
-  const totalLiabilities = liabilities.reduce((s, a) => s - a.balance, 0); // الخصوم رصيدها الطبيعي دائن (سالب في balance=debit-credit)
-  const totalEquity = equity.reduce((s, a) => s - a.balance, 0);
-  return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity, isBalanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 1 };
-}
-
-// بنك القسم: رصيد كل شركة لوحدها (داخل من صافي المستخلصات، خارج للعهد وشحن أوكتين) + رصيد إجمالي
-// بنك القسم — سجل يدوي بالكامل: بيرتّب حركات كل شركة (داخل/خارج) اللي المستخدم بيدخلها بنفسه، ويحسب الرصيد المتراكم
-function buildManualBank({ bankTransactions = [] }) {
-  const byOwner = {};
-  SOURCES.forEach((owner) => { byOwner[owner] = { transactions: [], totalIn: 0, totalOut: 0, balance: 0 }; });
-  SOURCES.forEach((owner) => {
-    const txs = (bankTransactions || []).filter((t) => t.owner === owner).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    let running = 0;
-    const withBalance = txs.map((t) => {
-      running += t.type === "out" ? -(Number(t.amount) || 0) : (Number(t.amount) || 0);
-      return { ...t, balance: running };
-    });
-    const totalIn = txs.filter((t) => t.type !== "out").reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const totalOut = txs.filter((t) => t.type === "out").reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    byOwner[owner] = { transactions: withBalance, totalIn, totalOut, balance: totalIn - totalOut };
-  });
-  const overall = Object.values(byOwner).reduce((s, o) => s + o.balance, 0);
-  return { byOwner, overall };
-}
-
-// محفظة أوكتين: المشحون والمستهلك والمتبقي لكل شركة (بيتحدد صاحب السولار من كود المعدة)
-// محفظة أوكتين: مجمّعة واحدة (مش لكل شركة) — الشحن بيتحصّل لاحقًا من رصيد أي شركة عن طريق بنك القسم يدويًا.
-// بس بنوضح استهلاك السولار موزّع حسب مالك المعدة للمعلومية فقط.
-function buildOctaneWallet({ octaneTopUps = [], fuelRecords = [], equipmentCodes = [] }) {
-  const ownerByCode = {};
-  (equipmentCodes || []).forEach((c) => { if (c.code) ownerByCode[normCode(c.code)] = c.owner; });
-
-  const totalCharged = (octaneTopUps || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
-  const totalSpent = (fuelRecords || []).reduce((s, r) => s + (Number(r.total) || 0), 0);
-
-  const spentByOwner = {};
-  SOURCES.forEach((owner) => { spentByOwner[owner] = 0; });
-  (fuelRecords || []).forEach((r) => {
-    const owner = ownerByCode[normCode(r.code)];
-    if (!owner) return;
-    spentByOwner[owner] = (spentByOwner[owner] || 0) + (Number(r.total) || 0);
-  });
-  const spentBreakdown = Object.entries(spentByOwner).map(([owner, spent]) => ({ owner, spent }));
-
-  return { totalCharged, totalSpent, totalRemaining: totalCharged - totalSpent, spentBreakdown };
-}
-
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -744,31 +471,19 @@ export default function App() {
   const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
   const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
   const [claims, saveClaims, claimsLoaded] = useStorage("claims", []);
-  const [claimDeductions, saveClaimDeductions, claimDeductionsLoaded] = useStorage("claimDeductions", []);
-  const [octaneTopUps, saveOctaneTopUps, octaneTopUpsLoaded] = useStorage("octaneTopUps", []);
-  const [bankTransactions, saveBankTransactions, bankTransactionsLoaded] = useStorage("bankTransactions", []);
-  // "الإيرادات" اتلغت كإدخال يدوي — بقى إيراد كل معدة بيتحسب مباشرة من المستخلصات (claims) عشان يفضل مصدر واحد للحقيقة
-  const revenues = useMemo(() => claims.map((c) => ({
-    id: c.id, equipmentCode: c.equipmentCode, owner: c.owner, source: c.owner, renter: c.owner,
-    location: c.location, month: c.claimMonth, startMonth: c.claimMonth,
-    total: Number(c.total) || 0, amount: Number(c.total) || 0, months: 1, monthlyRate: c.monthlyRate, notes: c.notes,
-  })), [claims]);
+  const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
   const [equipmentCodes, saveEquipmentCodes, codesLoaded] = useStorage("equipmentCodes", []);
   const [salaries, saveSalaries, salariesLoaded] = useStorage("salaries", []);
-  const [accounts, saveAccounts, accountsLoaded] = useStorage("accounts", CHART_OF_ACCOUNTS);
-  const [manualJournalEntries, saveManualJournalEntries, manualEntriesLoaded] = useStorage("manualJournalEntries", []);
-  const [fiscalClosings, saveFiscalClosings, fiscalClosingsLoaded] = useStorage("fiscalClosings", []);
   const [view, setView] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const v = params.get("view");
       const validViews = [
-        "home", "dashboard", "analysis", "revenueAnalysis", "entry", "custodies",
+        "home", "dashboard", "analysis", "revenueAnalysis", "entry", "revenue", "custodies",
         "database", "equipment", "profitability", "maintenanceLog", "fuel", "oils", "fuelAnalysis",
         "equipmentCodes", "salaries", "print", "alerts", "import", "export",
-        "accounting", "departmentBank", "octaneWallet", "claimDeductions",
       ];
       if (v && validViews.includes(v)) return v;
     } catch (e) {}
@@ -801,10 +516,8 @@ export default function App() {
 
   const [lastAction, setLastAction] = useState(null);
   const storeSavers = {
-    expenses: saveExpenses, custodies: saveCustodies,
+    expenses: saveExpenses, custodies: saveCustodies, revenues: saveRevenues,
     fuelRecords: saveFuelRecords, oilRecords: saveOilRecords, equipmentCodes: saveEquipmentCodes, salaries: saveSalaries,
-    accounts: saveAccounts, manualJournalEntries: saveManualJournalEntries, fiscalClosings: saveFiscalClosings,
-    claimDeductions: saveClaimDeductions, octaneTopUps: saveOctaneTopUps, claims: saveClaims, bankTransactions: saveBankTransactions,
   };
   const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
   const pushUndoMulti = (entries) => setLastAction(entries);
@@ -827,77 +540,6 @@ export default function App() {
   };
 
   const isCustodyApproved = (custodyId) => custodies.some((c) => c.id === custodyId && c.approved);
-
-  /* ============ المحاسبة: دليل الحسابات القابل للتعديل ============ */
-  const addAccount = (acc) => {
-    if (!acc.code || !acc.name) { showToast("كود الحساب واسمه مطلوبين", "danger"); return; }
-    if (accounts.some((a) => a.code === acc.code)) { showToast("كود الحساب ده موجود بالفعل", "danger"); return; }
-    pushUndo("accounts", accounts);
-    saveAccounts([...accounts, { code: acc.code, name: acc.name, type: acc.type }]);
-    logAudit("إضافة", "حساب محاسبي", `${acc.code} - ${acc.name}`);
-    showToast("تم إضافة الحساب");
-  };
-  const updateAccount = (code, updates) => {
-    pushUndo("accounts", accounts);
-    saveAccounts(accounts.map((a) => (a.code === code ? { ...a, ...updates } : a)));
-    logAudit("تعديل", "حساب محاسبي", code);
-    showToast("تم تعديل الحساب");
-  };
-  const deleteAccount = (code) => {
-    const inUse = manualJournalEntries.some((en) => en.lines.some((l) => l.account === code))
-      || Object.values(EXPENSE_ACCOUNT_BY_CATEGORY).includes(code) || ["1010", "1100", "1200", "4000", "3000"].includes(code);
-    if (inUse) { showToast("الحساب ده مستخدم في قيود أو مرتبط بتصنيف — مينفعش يتحذف", "danger"); return; }
-    pushUndo("accounts", accounts);
-    saveAccounts(accounts.filter((a) => a.code !== code));
-    logAudit("حذف", "حساب محاسبي", code);
-    showToast("تم حذف الحساب", "danger");
-  };
-
-  /* ============ المحاسبة: قيود يدوية مباشرة (مدين/دائن) ============ */
-  const addManualJournalEntry = (entry) => {
-    const totalDebit = entry.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
-    const totalCredit = entry.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
-    if (Math.abs(totalDebit - totalCredit) > 0.01 || totalDebit <= 0) {
-      showToast("القيد مش متوازن — إجمالي المدين لازم يساوي إجمالي الدائن", "danger");
-      return;
-    }
-    pushUndo("manualJournalEntries", manualJournalEntries);
-    const record = { id: uid(), date: entry.date, desc: entry.desc, equipmentCode: entry.equipmentCode || "", isManual: true, lines: entry.lines };
-    saveManualJournalEntries([...manualJournalEntries, record]);
-    logAudit("إضافة", "قيد يدوي", `${entry.desc} — ${fmtMoney(totalDebit)}`);
-    showToast("تم حفظ القيد");
-  };
-  const deleteManualJournalEntry = (id) => {
-    pushUndo("manualJournalEntries", manualJournalEntries);
-    saveManualJournalEntries(manualJournalEntries.filter((e) => e.id !== id));
-    logAudit("حذف", "قيد يدوي", id);
-    showToast("تم حذف القيد", "danger");
-  };
-
-  /* ============ المحاسبة: قفل السنة/الفترة المالية ============ */
-  const closeFiscalPeriod = (closingDate, label) => {
-    const autoEntries = buildJournalEntries({ custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts });
-    const allEntries = [...autoEntries, ...manualJournalEntries, ...fiscalClosings.map(closingToEntry)]
-      .filter((en) => (en.date || "") <= closingDate);
-    const stmt = buildIncomeStatement(allEntries, accounts);
-    if (stmt.revenueTotal === 0 && stmt.expenseTotal === 0) {
-      showToast("مفيش نشاط ليقفل في الفترة دي", "danger");
-      return;
-    }
-    const lines = [];
-    if (stmt.revenueTotal > 0) lines.push({ account: "4000", debit: stmt.revenueTotal, credit: 0 });
-    stmt.expenseLines.filter((l) => l.amount > 0).forEach((l) => lines.push({ account: l.code, debit: 0, credit: l.amount }));
-    const net = stmt.revenueTotal - stmt.expenseTotal;
-    if (net >= 0) lines.push({ account: "3000", debit: 0, credit: net });
-    else lines.push({ account: "3000", debit: -net, credit: 0 });
-
-    pushUndo("fiscalClosings", fiscalClosings);
-    const record = { id: uid(), date: closingDate, label: label || `قفل حتى ${closingDate}`, revenueTotal: stmt.revenueTotal, expenseTotal: stmt.expenseTotal, netAmount: net, lines };
-    saveFiscalClosings([...fiscalClosings, record]);
-    logAudit("قفل فترة مالية", "محاسبة", `${record.label} — صافي ${fmtMoney(net)}`);
-    showToast("تم قفل الفترة المالية وترحيل صافي النتيجة لحساب حقوق الملكية");
-  };
-  const closingToEntry = (c) => ({ id: `closing-${c.id}`, date: c.date, desc: `قيد قفل فترة — ${c.label}`, equipmentCode: "", isClosing: true, lines: c.lines });
 
   const addExpense = (entry) => {
     if (isCustodyApproved(entry.custodyId)) {
@@ -941,6 +583,48 @@ export default function App() {
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, loadedAmount } : e)));
     logAudit("تعديل", "مصروف", `تحديث المبلغ المحمّل إلى ${fmtMoney(loadedAmount)}`);
     showToast("تم تحديث المبلغ المحمّل");
+  };
+
+  const addRevenue = (entry) => {
+    pushUndo("revenues", revenues);
+    const total = Number(entry.amount) || 0;
+    const record = {
+      ...entry,
+      location: cleanText(entry.location),
+      total,
+      startMonth: entry.month, // توافق مع تاب تحليل الإيرادات وربحية المعدات
+      months: 1,
+      monthlyRate: total,
+      id: uid(),
+    };
+    saveRevenues([...revenues, record]);
+    logAudit("إضافة", "إيراد", `${entry.owner || ""} — ${entry.equipmentCode || "بند إيراد"} — ${fmtMoney(total)}`);
+    showToast("تم حفظ بند الإيراد بنجاح");
+  };
+
+  const updateRevenue = (id, entry) => {
+    const r0 = revenues.find((x) => x.id === id);
+    pushUndo("revenues", revenues);
+    const total = Number(entry.amount) || 0;
+    saveRevenues(revenues.map((r) => (r.id === id ? {
+      ...r,
+      ...entry,
+      location: cleanText(entry.location),
+      total,
+      startMonth: entry.month,
+      months: 1,
+      monthlyRate: total,
+    } : r)));
+    logAudit("تعديل", "إيراد", r0 ? (r0.equipmentCode || "بند إيراد") : id);
+    showToast("تم تعديل بند الإيراد");
+  };
+
+  const deleteRevenue = (id) => {
+    const r = revenues.find((x) => x.id === id);
+    pushUndo("revenues", revenues);
+    saveRevenues(revenues.filter((r) => r.id !== id));
+    logAudit("حذف", "إيراد", r ? (r.equipmentCode || "بند إيراد") : id);
+    showToast("تم حذف بند الإيراد", "danger");
   };
 
   const addFuelRecord = (rec) => {
@@ -1043,7 +727,7 @@ export default function App() {
       { storeKey: "expenses", prevValue: expenses },
       { storeKey: "fuelRecords", prevValue: fuelRecords },
       { storeKey: "oilRecords", prevValue: oilRecords },
-      { storeKey: "claims", prevValue: claims },
+      { storeKey: "revenues", prevValue: revenues },
       { storeKey: "equipmentCodes", prevValue: equipmentCodes },
     ]);
     const oldSet = new Set(oldSpellings.map((s) => normCode(s)));
@@ -1052,7 +736,7 @@ export default function App() {
     saveExpenses(expenses.map((e) => (matches(e.equipmentCode) ? { ...e, equipmentCode: canonical } : e)));
     saveFuelRecords(fuelRecords.map((r) => (matches(r.code) ? { ...r, code: canonical } : r)));
     saveOilRecords(oilRecords.map((r) => (matches(r.equipmentCode) ? { ...r, equipmentCode: canonical } : r)));
-    saveClaims(claims.map((c) => (matches(c.equipmentCode) ? { ...c, equipmentCode: canonical } : c)));
+    saveRevenues(revenues.map((r) => (matches(r.equipmentCode) ? { ...r, equipmentCode: canonical } : r)));
     // في أكواد المعدات: سيب سجل واحد بس بالإملاء الموحّد، واحذف الباقي
     const seenCanonical = { current: false };
     const cleanedCodes = [];
@@ -1238,57 +922,6 @@ export default function App() {
     showToast("تم حذف بند المستخلص", "danger");
   };
 
-  /* ============ خصومات المستخلص (مرتبات/سلف/سولار تدفعه الشركة وتخصمه) ============ */
-  const addClaimDeduction = (d) => {
-    if (!d.owner || !d.claimMonth || !(Number(d.amount) > 0)) { showToast("الشركة والشهر والمبلغ مطلوبين", "danger"); return; }
-    pushUndo("claimDeductions", claimDeductions);
-    saveClaimDeductions([...claimDeductions, { ...d, amount: Number(d.amount) || 0, id: uid() }]);
-    logAudit("إضافة", "خصم مستخلص", `${d.owner} — ${d.type || ""} — ${fmtMoney(d.amount)}`);
-    showToast("تم حفظ الخصم");
-  };
-  const updateClaimDeduction = (id, updates) => {
-    pushUndo("claimDeductions", claimDeductions);
-    saveClaimDeductions(claimDeductions.map((d) => (d.id === id ? { ...d, ...updates, amount: Number(updates.amount) || 0 } : d)));
-    logAudit("تعديل", "خصم مستخلص", id);
-    showToast("تم تعديل الخصم");
-  };
-  const deleteClaimDeduction = (id) => {
-    pushUndo("claimDeductions", claimDeductions);
-    saveClaimDeductions(claimDeductions.filter((d) => d.id !== id));
-    logAudit("حذف", "خصم مستخلص", id);
-    showToast("تم حذف الخصم", "danger");
-  };
-
-  /* ============ شحن محفظة أوكتين (سولار وكارتات) — مجمّعة واحدة، مش مرتبطة بشركة ============ */
-  const addOctaneTopUp = (t) => {
-    if (!t.date || !(Number(t.amount) > 0)) { showToast("التاريخ والمبلغ مطلوبين", "danger"); return; }
-    pushUndo("octaneTopUps", octaneTopUps);
-    saveOctaneTopUps([...octaneTopUps, { date: t.date, amount: Number(t.amount) || 0, notes: t.notes || "", id: uid() }]);
-    logAudit("إضافة", "شحن أوكتين", fmtMoney(t.amount));
-    showToast("تم تسجيل الشحن");
-  };
-  const deleteOctaneTopUp = (id) => {
-    pushUndo("octaneTopUps", octaneTopUps);
-    saveOctaneTopUps(octaneTopUps.filter((t) => t.id !== id));
-    logAudit("حذف", "شحن أوكتين", id);
-    showToast("تم حذف الشحن", "danger");
-  };
-
-  /* ============ بنك القسم — سجل يدوي بالكامل: داخل/خارج لكل شركة ============ */
-  const addBankTransaction = (t) => {
-    if (!t.owner || !t.date || !(Number(t.amount) > 0)) { showToast("الشركة والتاريخ والمبلغ مطلوبين", "danger"); return; }
-    pushUndo("bankTransactions", bankTransactions);
-    saveBankTransactions([...bankTransactions, { owner: t.owner, date: t.date, type: t.type === "out" ? "out" : "in", description: t.description || "", amount: Number(t.amount) || 0, id: uid() }]);
-    logAudit("إضافة", "حركة بنك القسم", `${t.owner} — ${t.type === "out" ? "خارج" : "داخل"} — ${fmtMoney(t.amount)}`);
-    showToast("تم تسجيل الحركة");
-  };
-  const deleteBankTransaction = (id) => {
-    pushUndo("bankTransactions", bankTransactions);
-    saveBankTransactions(bankTransactions.filter((t) => t.id !== id));
-    logAudit("حذف", "حركة بنك القسم", id);
-    showToast("تم حذف الحركة", "danger");
-  };
-
   const subCustodyTotals = useMemo(() => {
     const map = {};
     for (const c of subCustodies) {
@@ -1314,7 +947,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded;
 
   const NAV_GROUPS = [
     {
@@ -1331,13 +964,10 @@ export default function App() {
         { key: "subCustodies", label: "عهد فرعية (مشرفين)", icon: Wallet },
         { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
         { key: "database", label: "قاعدة البيانات", icon: Database },
-        { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
-        { key: "departmentBank", label: "بنك القسم", icon: Building2 },
-        { key: "octaneWallet", label: "محفظة أوكتين (سولار)", icon: Fuel },
+        { key: "revenue", label: "الإيرادات", icon: Wallet },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
-        { key: "accounting", label: "المحاسبة (قيود مزدوجة)", icon: BookOpen },
       ],
     },
     {
@@ -1605,11 +1235,8 @@ export default function App() {
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
-            {view === "claims" && <ClaimsView claims={claims} claimDeductions={claimDeductions} equipmentCodes={equipmentCodes} expenses={expenses} onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim} onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction} />}
-            {view === "departmentBank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={addBankTransaction} onDelete={deleteBankTransaction} />}
-            {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
+            {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
-            {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
@@ -1683,11 +1310,8 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "dashboard", label: "تقرير تنفيذي", desc: "مؤشرات حية ورسوم بيانية شاملة", icon: LayoutDashboard, color: COLORS.navy },
     { key: "analysis", label: "تحليل المصروفات", desc: "المواقع، الاتجاه الزمني، ومقارنة العهد", icon: BarChart3, color: "#2E7A50" },
     { key: "revenueAnalysis", label: "تحليل الإيرادات", desc: "أداء الإيراد لكل معدة وجهة مستأجرة", icon: TrendingUp, color: COLORS.gold },
-    { key: "accounting", label: "المحاسبة", desc: "دليل حسابات، قيود مزدوجة تلقائية، دفتر أستاذ، وميزان مراجعة", icon: BookOpen, color: "#2E5A8C" },
     { key: "entry", label: "إدخال بند صرف", desc: "سجّل معاملة مصروف جديدة", icon: FilePlus2, color: "#5B7A9E" },
-    { key: "claims", label: "المستخلصات", desc: "استحقاقات واستقطاعات وصافي — بأربع صور حسب مالك المعدة والجهة الشغالة عندها", icon: FileSpreadsheet, color: "#8B9C6E" },
-    { key: "departmentBank", label: "بنك القسم", desc: "رصيد كل شركة لوحدها — صافي المستخلصات الداخلة والعهد الخارجة", icon: Building2, color: "#1C2C4A" },
-    { key: "octaneWallet", label: "محفظة أوكتين", desc: "شحن ومتابعة رصيد محفظة السولار والكارتات", icon: Fuel, color: "#00838F" },
+    { key: "revenue", label: "الإيرادات", desc: "سجّل إيراد تأجير معدة شهري", icon: Wallet, color: "#8B9C6E" },
     { key: "custodies", label: "العهد", desc: "إدارة عهد الصرف لكل جهة", icon: ClipboardList, color: "#647085" },
     { key: "database", label: "قاعدة البيانات", desc: "كل بنود الصرف قابلة للبحث والفلترة", icon: Database, color: "#1C2C4A" },
     { key: "equipment", label: "بطاقة أداء المعدات", desc: "تكلفة وربحية كل معدة وسيارة", icon: Wrench, color: "#6A4A2E" },
@@ -5903,34 +5527,15 @@ function CompanyComparisonView({ expenses, revenues, fuelRecords, oilRecords, sa
   );
 }
 
-const CLAIM_DEDUCTION_TYPES = ["أجور ومرتبات", "دفعات مقدمة - سلف", "مسحوبات سولار", "توريدات زيوت ومواد تشغيل دورية", "خصومات أخرى"];
-
-function claimTypesFor(sources) {
-  return [
-    { key: "own0", equipmentOwner: sources[0], owner: sources[0], label: `معدات ${sources[0]} تعمل لدى ${sources[0]}` },
-    { key: "own1", equipmentOwner: sources[1], owner: sources[1], label: `معدات ${sources[1]} تعمل لدى ${sources[1]}` },
-    { key: "cross01", equipmentOwner: sources[0], owner: sources[1], label: `معدات ${sources[0]} تعمل لدى ${sources[1]}` },
-    { key: "cross10", equipmentOwner: sources[1], owner: sources[0], label: `معدات ${sources[1]} تعمل لدى ${sources[0]}` },
-  ];
-}
-
-function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddClaim, onUpdateClaim, onDeleteClaim, onAddDeduction, onUpdateDeduction, onDeleteDeduction }) {
-  const CLAIM_TYPES = useMemo(() => claimTypesFor(SOURCES), []);
-  const [activeTypeKey, setActiveTypeKey] = useState(CLAIM_TYPES[0].key);
-  const activeType = CLAIM_TYPES.find((t) => t.key === activeTypeKey) || CLAIM_TYPES[0];
-  const [activeMonth, setActiveMonth] = useState("الكل");
-
+function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const emptyEntitlement = { claimMonth: todayISO().slice(0, 7), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
-  const [form, setForm] = useState(emptyEntitlement);
+  const [q, setQ] = useState("");
+  const [monthFilter, setMonthFilter] = useState({}); // { [owner]: "الكل" | claimMonth }
+  const [printOwner, setPrintOwner] = useState("الكل");
+  const empty = { owner: SOURCES[0], claimMonth: todayISO().slice(0, 7), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
+  const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const [showDedForm, setShowDedForm] = useState(false);
-  const [editingDedId, setEditingDedId] = useState(null);
-  const emptyDeduction = { claimMonth: todayISO().slice(0, 7), type: CLAIM_DEDUCTION_TYPES[0], description: "", amount: "" };
-  const [dedForm, setDedForm] = useState(emptyDeduction);
-  const setDed = (k) => (e) => setDedForm((f) => ({ ...f, [k]: e.target.value }));
 
   const knownLocations = useMemo(() => {
     const s = new Set();
@@ -5942,57 +5547,29 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
   const handleCodeChange = (e) => {
     const code = e.target.value;
     const known = equipmentCodes.find((c) => c.code === code);
-    setForm((f) => ({ ...f, equipmentCode: code, location: known && known.location ? known.location : f.location }));
+    setForm((f) => ({ ...f, equipmentCode: code, owner: known && known.owner ? known.owner : f.owner, location: known && known.location ? known.location : f.location }));
   };
 
-  const typeClaims = useMemo(() => claims.filter((c) => (c.owner || SOURCES[0]) === activeType.owner && (c.equipmentOwner || c.owner || SOURCES[0]) === activeType.equipmentOwner), [claims, activeType]);
-  const typeDeductions = useMemo(() => claimDeductions.filter((d) => d.owner === activeType.owner && (d.equipmentOwner || d.owner) === activeType.equipmentOwner), [claimDeductions, activeType]);
-
-  const months = useMemo(() => [...new Set([...typeClaims.map((c) => c.claimMonth), ...typeDeductions.map((d) => d.claimMonth)])].filter(Boolean).sort().reverse(), [typeClaims, typeDeductions]);
-
-  const list = typeClaims.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
-  const dedList = typeDeductions.filter((d) => activeMonth === "الكل" || d.claimMonth === activeMonth);
-
-  const gross = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
-  const dedTotal = dedList.reduce((s, d) => s + (Number(d.amount) || 0), 0);
-  const net = gross - dedTotal;
-
-  const startAdd = () => { setEditingId(null); setForm({ ...emptyEntitlement, claimMonth: activeMonth !== "الكل" ? activeMonth : emptyEntitlement.claimMonth }); setShowForm(true); };
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
   const startEdit = (c) => {
     setEditingId(c.id);
-    setForm({ claimMonth: c.claimMonth || todayISO().slice(0, 7), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
+    setForm({ owner: c.owner || SOURCES[0], claimMonth: c.claimMonth || todayISO().slice(0, 7), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
     setShowForm(true);
   };
-  const cancel = () => { setShowForm(false); setEditingId(null); setForm(emptyEntitlement); };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+
   const submit = (e) => {
     e.preventDefault();
-    const payload = { ...form, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
-    if (editingId) onUpdateClaim(editingId, payload); else onAddClaim(payload);
+    if (editingId) onUpdate(editingId, form);
+    else onAdd(form);
     cancel();
   };
 
-  const startAddDed = () => { setEditingDedId(null); setDedForm({ ...emptyDeduction, claimMonth: activeMonth !== "الكل" ? activeMonth : emptyDeduction.claimMonth }); setShowDedForm(true); };
-  const startEditDed = (d) => { setEditingDedId(d.id); setDedForm({ claimMonth: d.claimMonth, type: d.type, description: d.description || "", amount: d.amount }); setShowDedForm(true); };
-  const cancelDed = () => { setShowDedForm(false); setEditingDedId(null); setDedForm(emptyDeduction); };
-  const submitDed = (e) => {
-    e.preventDefault();
-    const payload = { ...dedForm, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
-    if (editingDedId) onUpdateDeduction(editingDedId, payload); else onAddDeduction(payload);
-    cancelDed();
-  };
+  const term = q.trim().toLowerCase();
+  const matches = (c) => !term || [c.equipmentCode, c.location, c.notes].join(" ").toLowerCase().includes(term);
 
   const hourlyPreview = (Number(form.monthlyRate) || 0) / 196;
   const totalPreview = hourlyPreview * (Number(form.hoursWorked) || 0);
-
-  // ملخص المواقع لصفحة الغلاف وقت الطباعة
-  const byLocation = useMemo(() => {
-    const map = {};
-    list.forEach((c) => {
-      const loc = c.location || "بدون موقع";
-      map[loc] = (map[loc] || 0) + (Number(c.total) || 0);
-    });
-    return Object.entries(map).map(([location, total]) => ({ location, total })).sort((a, b) => b.total - a.total);
-  }, [list]);
 
   const handlePrint = () => window.print();
 
@@ -6000,50 +5577,52 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
     <div className="space-y-6">
       <Header
         title="المستخلصات"
-        sub="مستخلص شهري بأربع صور — حسب مالك المعدة والجهة اللي شغّالة عندها — استحقاقات واستقطاعات وصافي"
+        sub="مستخلص شهري لكل شركة بأعمال معداتها — الفترة من 26 لحد 25 من كل شهر"
         action={
           <div className="no-print flex flex-wrap gap-2">
             <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
               <Printer size={16} /> طباعة
             </button>
+            <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+              {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "بند مستخلص جديد"}
+            </button>
           </div>
         }
       />
 
-      <div className="no-print flex flex-wrap gap-2">
-        {CLAIM_TYPES.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => { setActiveTypeKey(t.key); setActiveMonth("الكل"); }}
-            className="px-3 py-2 rounded-lg text-xs font-bold"
-            style={{ background: activeTypeKey === t.key ? COLORS.navy : COLORS.cream, color: activeTypeKey === t.key ? "white" : COLORS.slate }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="no-print flex flex-wrap items-center gap-2">
-        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>الشهر:</span>
-        <button onClick={() => setActiveMonth("الكل")} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === "الكل" ? COLORS.navy : COLORS.cream, color: activeMonth === "الكل" ? "white" : COLORS.slate }}>الكل</button>
-        {months.map((m) => (
-          <button key={m} onClick={() => setActiveMonth(m)} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === m ? COLORS.navy : COLORS.cream, color: activeMonth === m ? "white" : COLORS.slate }}>{m}</button>
-        ))}
+      <div className="no-print grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="relative md:col-span-1">
+          <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بكود المعدة أو الموقع أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
+        </div>
+        <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold" style={{ color: COLORS.slate }}>اطبع:</span>
+          {["الكل", ...SOURCES].map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setPrintOwner(opt)}
+              className="px-3 py-2 rounded-lg text-xs font-bold"
+              style={{ background: printOwner === opt ? COLORS.navy : COLORS.cream, color: printOwner === opt ? "white" : COLORS.slate }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
       </div>
 
       {showForm && (
         <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
           <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند استحقاق" : "بند استحقاق جديد"}</h3>
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند مستخلص" : "بند مستخلص جديد"}</h3>
               <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
             </div>
-            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="شهر المستخلص" required><TextInput type="month" value={form.claimMonth} onChange={set("claimMonth")} required /></Field>
+              <Field label="الجهة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
               <Field label="كود المعدة" required>
                 <TextInput list="claim-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
-                <datalist id="claim-codes">{equipmentCodes.filter((c) => c.owner === activeType.equipmentOwner).map((c) => <option key={c.id} value={c.code} />)}</datalist>
+                <datalist id="claim-codes">{equipmentCodes.map((c) => <option key={c.id} value={c.code} />)}</datalist>
               </Field>
               <Field label="موقع العمل">
                 <Select value={form.location} onChange={set("location")}>
@@ -6069,117 +5648,77 @@ function ClaimsView({ claims, claimDeductions, equipmentCodes, expenses, onAddCl
         </div>
       )}
 
-      {showDedForm && (
-        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-          <form onSubmit={submitDed} className="w-full max-w-lg rounded-2xl p-6" style={{ background: COLORS.paper }}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingDedId ? "تعديل استقطاع" : "استقطاع جديد"}</h3>
-              <button type="button" onClick={cancelDed} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-            </div>
-            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="الشهر" required><TextInput type="month" value={dedForm.claimMonth} onChange={setDed("claimMonth")} required /></Field>
-              <Field label="نوع الاستقطاع" required><Select value={dedForm.type} onChange={setDed("type")}>{CLAIM_DEDUCTION_TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
-              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={dedForm.amount} onChange={setDed("amount")} required placeholder="0" /></Field>
-              <div className="md:col-span-2"><Field label="الوصف"><TextInput value={dedForm.description} onChange={setDed("description")} placeholder="مثال: مرتب السائق فلان" /></Field></div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6 pt-2">
-              <button type="button" onClick={cancelDed} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingDedId ? "حفظ التعديل" : "حفظ الاستقطاع"}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
       <div id="print-area">
         <PrintLetterhead />
-
-        {/* غلاف الطباعة: ملخص كل موقع وإجمالي مستحقاته */}
-        <div className="hidden print:block mb-6">
-          <div className="text-center font-extrabold text-lg mb-1">{activeType.label}</div>
-          <div className="text-center text-sm mb-4" style={{ color: COLORS.slate }}>{activeMonth === "الكل" ? "كل الشهور" : activeMonth}</div>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr style={{ background: COLORS.navy, color: "white" }}>
-                <th className="border px-3 py-2 text-right">الموقع</th>
-                <th className="border px-3 py-2 text-right">إجمالي الاستحقاقات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byLocation.map((r) => (
-                <tr key={r.location}><td className="border px-3 py-2">{r.location}</td><td className="border px-3 py-2 tabular-nums">{fmtMoney(r.total)}</td></tr>
-              ))}
-              <tr style={{ background: COLORS.cream }}><td className="border px-3 py-2 font-extrabold">الإجمالي</td><td className="border px-3 py-2 font-extrabold tabular-nums">{fmtMoney(gross)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <SectionCard
-          title={`الاستحقاقات — ${activeType.label} (${list.length}) — ${fmtMoney(gross)}`}
-          action={<button onClick={startAdd} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> بند استحقاق جديد</button>}
-        >
-          {list.length === 0 ? (
-            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود مطابقة</div>
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
-                      <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((c) => (
-                    <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
-                      <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
-                      <td className="px-3 py-2.5">{c.notes || "—"}</td>
-                      <td className="px-3 py-2.5 no-print">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                          <button onClick={() => onDeleteClaim(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
+        {claims.length === 0 ? (
+          <SectionCard><EmptyState icon={FileSpreadsheet} title="لا توجد مستخلصات مسجلة بعد" /></SectionCard>
+        ) : (
+          SOURCES.filter((owner) => printOwner === "الكل" || printOwner === owner).map((owner, idx) => {
+            const ownerAll = claims.filter((c) => (c.owner || SOURCES[0]) === owner).filter(matches);
+            const months = [...new Set(ownerAll.map((c) => c.claimMonth))].sort().reverse();
+            const activeMonth = monthFilter[owner] || "الكل";
+            const list = ownerAll.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
+            const total = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+            return (
+              <SectionCard
+                key={owner}
+                className={idx > 0 ? "print-page-break" : ""}
+                title={`مستخلص ${owner} (${list.length}) — ${fmtMoney(total)}`}
+                action={
+                  <button onClick={() => startAdd(owner)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                    <Plus size={13} className="inline -mt-0.5" /> إضافة لـ {owner}
+                  </button>
+                }
+              >
+                {activeMonth !== "الكل" && (
+                  <div className="text-xs font-bold mb-3" style={{ color: COLORS.gold }}>الفترة: {claimPeriodLabel(activeMonth)}</div>
+                )}
+                <div className="no-print flex flex-wrap items-center gap-2 mb-4">
+                  <span className="text-xs font-bold" style={{ color: COLORS.slate }}>الشهر:</span>
+                  <button onClick={() => setMonthFilter((f) => ({ ...f, [owner]: "الكل" }))} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === "الكل" ? COLORS.navy : COLORS.cream, color: activeMonth === "الكل" ? "white" : COLORS.slate }}>الكل</button>
+                  {months.map((m) => (
+                    <button key={m} onClick={() => setMonthFilter((f) => ({ ...f, [owner]: m }))} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === m ? COLORS.navy : COLORS.cream, color: activeMonth === m ? "white" : COLORS.slate }}>{m}</button>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title={`الاستقطاعات (${dedList.length}) — ${fmtMoney(dedTotal)}`}
-          action={<button onClick={startAddDed} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> استقطاع جديد</button>}
-        >
-          {dedList.length === 0 ? (
-            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد استقطاعات</div>
-          ) : (
-            <div className="space-y-1.5">
-              {dedList.map((d) => (
-                <div key={d.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
-                  <span>{d.type} — {d.description || "—"} <span className="text-xs" style={{ color: COLORS.slate }}>({d.claimMonth})</span></span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold tabular-nums">{fmtMoney(d.amount)}</span>
-                    <button onClick={() => startEditDed(d)} className="no-print p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={12} /></button>
-                    <button onClick={() => onDeleteDeduction(d.id)} className="no-print p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
-                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
 
-        <div className="p-4 rounded-xl flex items-center justify-between" style={{ background: COLORS.navy }}>
-          <span className="font-extrabold text-white">صافي المستحق صرفه</span>
-          <span className="font-extrabold tabular-nums text-lg" style={{ color: net >= 0 ? "#8FE3A8" : "#E0796C" }}>{fmtMoney(net)}</span>
-        </div>
+                {list.length === 0 ? (
+                  <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود مطابقة</div>
+                ) : (
+                  <div className="overflow-x-auto -mx-5">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                          {["كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
+                            <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {list.map((c) => (
+                          <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                            <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
+                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
+                            <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
+                            <td className="px-3 py-2.5">{c.notes || "—"}</td>
+                            <td className="px-3 py-2.5 no-print">
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                                <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -6478,10 +6017,6 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   const mergeKey = (code) => (code ? looseKey(normCode(code)) : "");
 
-  // بترتب البنود عشان بنود نفس المعدة تتجمع مع بعض بصريًا، من غير أي دمج/تقسيم صفحات يدوي —
-  // كل صف بيوري كود معدته بنفسه، عشان محدش يضيع لو اتقطعت الصفحة في أي حتة (حتى في نص مجموعة).
-  // تقسيم الصفحات نفسه بقى مسؤولية المتصفح بالكامل (page-break-inside: avoid على كل tr)، فمفيش فراغات
-  // ولا قفزات غلط، والصفحة بتتملى للآخر طول ما فيه بنود.
   const sortForMerge = (rows) => {
     const withIdx = rows.map((r, i) => ({ r, i, key: mergeKey(r.equipmentCode) }));
     const firstIndex = {};
@@ -6496,10 +6031,77 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     return withIdx.map((x) => x.r);
   };
 
-  const grouped = CATEGORIES.map((cat) => ({
+  // نطبّق الدمج (rowSpan) داخل قطعة واحدة بس (صفحة واحدة)، مش عبر كل بنود المعدة
+  const withMergeInfo = (rows, chunkSizes) => {
+    const result = [];
+    let pos = 0;
+    const sizes = chunkSizes && chunkSizes.length ? chunkSizes : [rows.length];
+    sizes.forEach((size) => {
+      const section = rows.slice(pos, pos + size);
+      pos += size;
+      let i = 0;
+      while (i < section.length) {
+        const key = mergeKey(section[i].equipmentCode);
+        if (!key) {
+          result.push({ ...section[i], _mergeStart: true, _mergeSpan: 1, _chunkEnd: i === section.length - 1 });
+          i++;
+          continue;
+        }
+        let runEnd = i + 1;
+        while (runEnd < section.length && mergeKey(section[runEnd].equipmentCode) === key) runEnd++;
+        const span = runEnd - i;
+        for (let j = i; j < runEnd; j++) {
+          result.push({ ...section[j], _mergeStart: j === i, _mergeSpan: span, _chunkEnd: j === section.length - 1 });
+        }
+        i = runEnd;
+      }
+    });
+    return result;
+  };
+
+  const groupedRaw = CATEGORIES.map((cat) => ({
     cat,
-    rows: sortForMerge(items.filter((e) => e.category === cat)),
-  })).filter((g) => g.rows.length > 0);
+    rawRows: sortForMerge(items.filter((e) => e.category === cat)),
+  })).filter((g) => g.rawRows.length > 0);
+
+  // ============ قياس حقيقي لارتفاع كل بند عشان نقسّم الصفحات صح ============
+  const measureRefs = useRef({});
+  const bannerRefs = useRef({});
+  const [chunkPlan, setChunkPlan] = useState({});
+  const PAGE_BUDGET_PX = 1850; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش) — مرفوع عشان الصفحة تتملى كامل
+  const FIRST_PAGE_EXTRA_USED_PX = 300; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
+
+  useLayoutEffect(() => {
+    const plan = {};
+    let remaining = PAGE_BUDGET_PX - FIRST_PAGE_EXTRA_USED_PX;
+    groupedRaw.forEach((g) => {
+      const els = measureRefs.current[g.cat] || [];
+      const bannerH = bannerRefs.current[g.cat]?.offsetHeight || 34;
+      if (remaining < bannerH + 40) remaining = PAGE_BUDGET_PX; // مفيش مساحة كفاية حتى للعنوان، ابدأ صفحة جديدة
+      remaining -= bannerH;
+      const chunks = [];
+      let count = 0;
+      g.rawRows.forEach((row, idx) => {
+        const h = (els[idx]?.offsetHeight || 24) * 0.82; // تعويض دايمًا بيبقى التقدير متحفظ أكتر من الحقيقة
+        if (count > 0 && h > remaining) {
+          chunks.push(count);
+          remaining = PAGE_BUDGET_PX;
+          count = 0;
+        }
+        remaining -= h;
+        count++;
+      });
+      if (count > 0) chunks.push(count);
+      plan[g.cat] = chunks;
+    });
+    setChunkPlan(plan);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, custodyId]);
+
+  const grouped = groupedRaw.map((g) => ({
+    cat: g.cat,
+    rows: withMergeInfo(g.rawRows, chunkPlan[g.cat]),
+  }));
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
 
@@ -6532,6 +6134,36 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   return (
     <div className="space-y-6">
+      {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============ */}
+      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 720 }}>
+        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 720 }}>
+          <tbody>
+            {groupedRaw.map((g) => (
+              <React.Fragment key={g.cat}>
+                <tr ref={(el) => { bannerRefs.current[g.cat] = el; }}>
+                  <td colSpan={11} className="border px-3 py-1.5 font-extrabold">{g.cat}</td>
+                </tr>
+                {g.rawRows.map((e, idx) => (
+                  <tr key={e.id} ref={(el) => { if (!measureRefs.current[g.cat]) measureRefs.current[g.cat] = []; measureRefs.current[g.cat][idx] = el; }}>
+                    <td className="border px-2.5 py-2 text-center">{idx + 1}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.date}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.equipmentCode || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.equipmentType || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.brand || "—"}</td>
+                    <td className="border px-2.5 py-2 text-center">{e.location || "—"}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed">{e.purpose}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed">{e.notes || ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center">{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="no-print">
         <Header
           title="طباعة عهدة"
@@ -6609,23 +6241,52 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                {g.rows.map((e, i) => (
-                  <tr key={e.id}>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {(() => {
+                const chunks = [];
+                g.rows.forEach((row) => {
+                  if (chunks.length === 0) chunks.push([row]);
+                  else chunks[chunks.length - 1].push(row);
+                  if (row._chunkEnd) chunks.push([]);
+                });
+                if (chunks.length && chunks[chunks.length - 1].length === 0) chunks.pop();
+                let runningIndex = 0;
+                return chunks.map((chunk, ci) => {
+                  const startIndex = runningIndex;
+                  runningIndex += chunk.length;
+                  return (
+                    <tbody key={ci} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      {chunk.map((e, localI) => {
+                        const i = startIndex + localI;
+                        return (
+                          <tr key={e.id}>
+                            <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                            )}
+                            {e._mergeStart && (
+                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
+                            )}
+                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
+                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  );
+                });
+              })()}
             </table>
           ))}
           <div className="totals-signatures-block">
@@ -6667,643 +6328,9 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   );
 }
 
-
 /* ============================================================
-   المحاسبة — الشاشة
+   طباعة مستخلص
 ============================================================ */
-function AccountingView({
-  custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes,
-  accounts, manualJournalEntries, fiscalClosings,
-  onAddAccount, onUpdateAccount, onDeleteAccount, onAddManualEntry, onDeleteManualEntry, onCloseFiscalPeriod,
-}) {
-  const [tab, setTab] = useState("journal");
-  const [ledgerAccount, setLedgerAccount] = useState(accounts[0]?.code || "1100");
-
-  const closingToEntryLocal = (c) => ({ id: `closing-${c.id}`, date: c.date, desc: `قيد قفل فترة — ${c.label}`, equipmentCode: "", isClosing: true, lines: c.lines });
-
-  const autoEntries = useMemo(() => buildJournalEntries({ custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts }),
-    [custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts]);
-  const entries = useMemo(() => [...autoEntries, ...manualJournalEntries, ...fiscalClosings.map(closingToEntryLocal)].sort((a, b) => (a.date || "").localeCompare(b.date || "")),
-    [autoEntries, manualJournalEntries, fiscalClosings]);
-
-  const accountByCode = useMemo(() => Object.fromEntries(accounts.map((a) => [a.code, a])), [accounts]);
-  const trialBalance = useMemo(() => buildTrialBalance(entries, accounts), [entries, accounts]);
-  const income = useMemo(() => buildIncomeStatement(entries, accounts), [entries, accounts]);
-  const balanceSheet = useMemo(() => buildBalanceSheet(entries, accounts), [entries, accounts]);
-  const ledgerRows = useMemo(() => buildLedgerForAccount(entries, ledgerAccount), [entries, ledgerAccount]);
-
-  const totalDebit = trialBalance.reduce((s, a) => s + a.debit, 0);
-  const totalCredit = trialBalance.reduce((s, a) => s + a.credit, 0);
-  const isBalanced = Math.abs(totalDebit - totalCredit) < 1;
-
-  const TABS = [
-    { key: "journal", label: "القيود اليومية", icon: FilePlus2 },
-    { key: "manual", label: "قيود يدوية", icon: Pencil },
-    { key: "accounts", label: "دليل الحسابات", icon: ListChecks },
-    { key: "ledger", label: "دفتر الأستاذ", icon: BookOpen },
-    { key: "trial", label: "ميزان المراجعة", icon: Scale },
-    { key: "balanceSheet", label: "الميزانية العمومية", icon: Building2 },
-    { key: "income", label: "قائمة الدخل وربحية المعدات", icon: TrendingUp },
-    { key: "closing", label: "قفل السنة المالية", icon: ShieldCheck },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <Header title="المحاسبة" sub="قيود مزدوجة (مدين/دائن) بتتولّد تلقائيًا من المستخلصات والعهد والمصروفات ومحفظة أوكتين" />
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          ["إجمالي المدين", totalDebit],
-          ["إجمالي الدائن", totalCredit],
-          ["صافي نتيجة القسم", income.net],
-          ["عدد القيود", entries.length],
-        ].map(([label, val], i) => (
-          <div key={label} className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
-            <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>{label}</div>
-            <div className="text-lg font-extrabold tabular-nums" style={{ color: i === 2 ? (income.net >= 0 ? "#1B5E20" : COLORS.danger) : COLORS.ink }}>
-              {i === 3 ? fmtNum(val) : fmtMoney(val)}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {!isBalanced && (
-        <div className="p-3 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: "#FDECEA", color: COLORS.danger }}>
-          <AlertTriangle size={16} /> تحذير: ميزان المراجعة مش متوازن (فرق {fmtMoney(totalDebit - totalCredit)}) — راجع البيانات
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className="px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1.5"
-            style={{ background: tab === t.key ? COLORS.navy : "transparent", color: tab === t.key ? "white" : COLORS.slate }}
-          >
-            <t.icon size={14} /> {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "accounts" && (
-        <AccountingAccountsTab accounts={accounts} onAdd={onAddAccount} onUpdate={onUpdateAccount} onDelete={onDeleteAccount} />
-      )}
-
-      {tab === "manual" && (
-        <AccountingManualEntriesTab accounts={accounts} manualJournalEntries={manualJournalEntries} onAdd={onAddManualEntry} onDelete={onDeleteManualEntry} />
-      )}
-
-      {tab === "journal" && (
-        <SectionCard title={`القيود اليومية (${entries.length})`}>
-          {entries.length === 0 ? (
-            <EmptyState icon={FilePlus2} title="لا توجد قيود بعد" sub="القيود بتتولّد تلقائيًا أول ما تسجّل مستخلص أو عهدة أو مصروف" />
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["التاريخ", "البيان", "كود المعدة", "من حـ/ (مدين)", "إلى حـ/ (دائن)", "المبلغ"].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((en) => {
-                    const debitLine = en.lines.find((l) => l.debit > 0);
-                    const creditLine = en.lines.find((l) => l.credit > 0);
-                    return (
-                      <tr key={en.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{en.date || "—"}</td>
-                        <td className="px-3 py-2.5">{en.desc}{en.isManual && <span className="mr-1 text-[10px] font-bold" style={{ color: COLORS.gold }}> (يدوي)</span>}{en.isClosing && <span className="mr-1 text-[10px] font-bold" style={{ color: COLORS.danger }}> (قفل فترة)</span>}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{en.equipmentCode || "—"}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{debitLine ? `${debitLine.account} - ${accountByCode[debitLine.account]?.name || "؟"}` : "—"}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{creditLine ? `${creditLine.account} - ${accountByCode[creditLine.account]?.name || "؟"}` : "—"}</td>
-                        <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{fmtMoney(debitLine?.debit || creditLine?.credit)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
-
-      {tab === "ledger" && (
-        <SectionCard
-          title="دفتر الأستاذ"
-          action={
-            <Select value={ledgerAccount} onChange={(e) => setLedgerAccount(e.target.value)} className="w-64">
-              {accounts.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-            </Select>
-          }
-        >
-          {ledgerRows.length === 0 ? (
-            <EmptyState icon={BookOpen} title="لا توجد حركات على الحساب ده" />
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["التاريخ", "البيان", "كود المعدة", "مدين", "دائن", "الرصيد"].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ledgerRows.map((r, i) => (
-                    <tr key={i} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{r.date || "—"}</td>
-                      <td className="px-3 py-2.5">{r.desc}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{r.equipmentCode || "—"}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{r.debit ? fmtMoney(r.debit) : ""}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{r.credit ? fmtMoney(r.credit) : ""}</td>
-                      <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(r.balance)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      )}
-
-      {tab === "trial" && (
-        <SectionCard title="ميزان المراجعة">
-          <div className="overflow-x-auto -mx-5">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                  {["كود الحساب", "اسم الحساب", "مدين", "دائن", "الرصيد"].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {trialBalance.map((a) => (
-                  <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
-                    <td className="px-3 py-2.5 font-bold tabular-nums">{a.code}</td>
-                    <td className="px-3 py-2.5">{a.name}</td>
-                    <td className="px-3 py-2.5 tabular-nums">{a.debit ? fmtMoney(a.debit) : "—"}</td>
-                    <td className="px-3 py-2.5 tabular-nums">{a.credit ? fmtMoney(a.credit) : "—"}</td>
-                    <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(a.balance)}</td>
-                  </tr>
-                ))}
-                <tr className="border-t-2" style={{ borderColor: COLORS.ink, background: COLORS.cream }}>
-                  <td colSpan={2} className="px-3 py-2.5 font-extrabold">الإجمالي</td>
-                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalDebit)}</td>
-                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalCredit)}</td>
-                  <td className="px-3 py-2.5 font-extrabold tabular-nums">{fmtMoney(totalDebit - totalCredit)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      )}
-
-      {tab === "balanceSheet" && (
-        <SectionCard title="الميزانية العمومية">
-          {!balanceSheet.isBalanced && (
-            <div className="p-3 mb-4 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: "#FDECEA", color: COLORS.danger }}>
-              <AlertTriangle size={16} /> الأصول مش متساوية مع (الخصوم + حقوق الملكية)
-            </div>
-          )}
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <div className="font-extrabold mb-2" style={{ color: COLORS.ink }}>الأصول</div>
-              {balanceSheet.assets.map((a) => (
-                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
-                  <span style={{ color: COLORS.slate }}>{a.name}</span>
-                  <span className="tabular-nums font-bold">{fmtMoney(a.balance)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between py-2 font-extrabold mt-2 border-t-2" style={{ borderColor: COLORS.ink }}>
-                <span>إجمالي الأصول</span><span className="tabular-nums">{fmtMoney(balanceSheet.totalAssets)}</span>
-              </div>
-            </div>
-            <div>
-              <div className="font-extrabold mb-2" style={{ color: COLORS.ink }}>الخصوم وحقوق الملكية</div>
-              {balanceSheet.liabilities.map((a) => (
-                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
-                  <span style={{ color: COLORS.slate }}>{a.name}</span>
-                  <span className="tabular-nums font-bold">{fmtMoney(-a.balance)}</span>
-                </div>
-              ))}
-              {balanceSheet.equity.map((a) => (
-                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
-                  <span style={{ color: COLORS.slate }}>{a.name}</span>
-                  <span className="tabular-nums font-bold">{fmtMoney(-a.balance)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between py-2 font-extrabold mt-2 border-t-2" style={{ borderColor: COLORS.ink }}>
-                <span>الإجمالي</span><span className="tabular-nums">{fmtMoney(balanceSheet.totalLiabilities + balanceSheet.totalEquity)}</span>
-              </div>
-            </div>
-          </div>
-        </SectionCard>
-      )}
-
-      {tab === "income" && (
-        <div className="space-y-6">
-          <SectionCard title="قائمة الدخل الإجمالية">
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between py-2 border-b" style={{ borderColor: COLORS.border }}>
-                <span className="font-bold">إجمالي إيراد تأجير المعدات</span>
-                <span className="font-bold tabular-nums" style={{ color: "#1B5E20" }}>{fmtMoney(income.revenueTotal)}</span>
-              </div>
-              {income.expenseLines.map((l) => (
-                <div key={l.code} className="flex justify-between py-1.5">
-                  <span style={{ color: COLORS.slate }}>{l.name}</span>
-                  <span className="tabular-nums" style={{ color: COLORS.danger }}>{fmtMoney(l.amount)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between py-2 border-t-2 mt-2" style={{ borderColor: COLORS.ink }}>
-                <span className="font-extrabold">صافي نتيجة القسم</span>
-                <span className="font-extrabold tabular-nums" style={{ color: income.net >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(income.net)}</span>
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard title={`ربحية كل معدة كمركز تكلفة/مشروع مستقل (${income.byEquipment.length})`}>
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["كود المعدة", "الإيراد", "المصروفات", "صافي الربح/الخسارة"].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {income.byEquipment.map((r) => (
-                    <tr key={r.code} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 font-semibold">{r.code}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{fmtMoney(r.revenue)}</td>
-                      <td className="px-3 py-2.5 tabular-nums">{fmtMoney(r.expense)}</td>
-                      <td className="px-3 py-2.5 font-bold tabular-nums" style={{ color: r.net >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.net)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
-        </div>
-      )}
-
-      {tab === "closing" && (
-        <AccountingClosingTab fiscalClosings={fiscalClosings} onClose={onCloseFiscalPeriod} />
-      )}
-    </div>
-  );
-}
-
-function AccountingAccountsTab({ accounts, onAdd, onUpdate, onDelete }) {
-  const [form, setForm] = useState({ code: "", name: "", type: "expense" });
-  const [editingCode, setEditingCode] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", type: "" });
-
-  const submit = (e) => {
-    e.preventDefault();
-    onAdd(form);
-    setForm({ code: "", name: "", type: "expense" });
-  };
-  const startEdit = (a) => { setEditingCode(a.code); setEditForm({ name: a.name, type: a.type }); };
-  const saveEdit = (code) => { onUpdate(code, editForm); setEditingCode(null); };
-
-  return (
-    <div className="space-y-4">
-      <SectionCard title="إضافة حساب جديد">
-        <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-          <Field label="كود الحساب" required><TextInput value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} required placeholder="مثال: 5960" /></Field>
-          <div className="md:col-span-2"><Field label="اسم الحساب" required><TextInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required /></Field></div>
-          <Field label="النوع"><Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>{Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
-          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.navy }}><Plus size={14} className="inline -mt-0.5" /> إضافة الحساب</button>
-        </form>
-      </SectionCard>
-
-      <SectionCard title={`دليل الحسابات (${accounts.length})`}>
-        <div className="overflow-x-auto -mx-5">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                {["كود الحساب", "اسم الحساب", "النوع", ""].map((h) => (
-                  <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
-                  <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{a.code}</td>
-                  {editingCode === a.code ? (
-                    <>
-                      <td className="px-3 py-2.5"><TextInput value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} /></td>
-                      <td className="px-3 py-2.5"><Select value={editForm.type} onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}>{Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></td>
-                      <td className="px-3 py-2.5 flex gap-1.5">
-                        <button onClick={() => saveEdit(a.code)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: "#1B5E20" }}><CheckCircle2 size={16} /></button>
-                        <button onClick={() => setEditingCode(null)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><X size={16} /></button>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="px-3 py-2.5">{a.name}</td>
-                      <td className="px-3 py-2.5">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                      <td className="px-3 py-2.5 flex gap-1.5">
-                        <button onClick={() => startEdit(a)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                        <button onClick={() => onDelete(a.code)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
-    </div>
-  );
-}
-
-function AccountingManualEntriesTab({ accounts, manualJournalEntries, onAdd, onDelete }) {
-  const emptyLine = () => ({ account: accounts[0]?.code || "", debit: "", credit: "" });
-  const [form, setForm] = useState({ date: todayISO(), desc: "", equipmentCode: "", lines: [emptyLine(), emptyLine()] });
-
-  const setLine = (i, field, val) => setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? { ...l, [field]: val } : l)) }));
-  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }));
-  const removeLine = (i) => setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
-
-  const totalDebit = form.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
-  const totalCredit = form.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
-
-  const submit = (e) => {
-    e.preventDefault();
-    const lines = form.lines.filter((l) => (Number(l.debit) || 0) > 0 || (Number(l.credit) || 0) > 0)
-      .map((l) => ({ account: l.account, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 }));
-    onAdd({ ...form, lines });
-    setForm({ date: todayISO(), desc: "", equipmentCode: "", lines: [emptyLine(), emptyLine()] });
-  };
-
-  return (
-    <div className="space-y-4">
-      <SectionCard title="قيد يدوي جديد">
-        <form onSubmit={submit} className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
-            <div className="md:col-span-2"><Field label="البيان" required><TextInput value={form.desc} onChange={(e) => setForm((f) => ({ ...f, desc: e.target.value }))} required /></Field></div>
-          </div>
-          <Field label="كود المعدة (اختياري)"><TextInput value={form.equipmentCode} onChange={(e) => setForm((f) => ({ ...f, equipmentCode: e.target.value }))} /></Field>
-
-          <div className="space-y-2">
-            {form.lines.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-6"><Select value={l.account} onChange={(e) => setLine(i, "account", e.target.value)}>{accounts.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}</Select></div>
-                <div className="col-span-2"><TextInput type="number" step="0.01" placeholder="مدين" value={l.debit} onChange={(e) => setLine(i, "debit", e.target.value)} /></div>
-                <div className="col-span-2"><TextInput type="number" step="0.01" placeholder="دائن" value={l.credit} onChange={(e) => setLine(i, "credit", e.target.value)} /></div>
-                <button type="button" onClick={() => removeLine(i)} className="col-span-2 p-2 rounded-md hover:bg-red-50 text-center" style={{ color: COLORS.danger }}><Trash2 size={14} className="inline" /></button>
-              </div>
-            ))}
-          </div>
-          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> إضافة سطر</button>
-
-          <div className="text-xs font-bold" style={{ color: Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0 ? "#1B5E20" : COLORS.danger }}>
-            إجمالي المدين {fmtMoney(totalDebit)} — إجمالي الدائن {fmtMoney(totalCredit)}
-          </div>
-
-          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ القيد</button>
-        </form>
-      </SectionCard>
-
-      <SectionCard title={`القيود اليدوية (${manualJournalEntries.length})`}>
-        {manualJournalEntries.length === 0 ? (
-          <EmptyState icon={Pencil} title="لا توجد قيود يدوية بعد" />
-        ) : (
-          <div className="space-y-2">
-            {manualJournalEntries.map((en) => (
-              <div key={en.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
-                <div>
-                  <div className="font-bold">{en.desc} <span className="text-xs font-normal" style={{ color: COLORS.slate }}>({en.date})</span></div>
-                  <div className="text-xs mt-1" style={{ color: COLORS.slate }}>{en.lines.map((l) => `${l.account} ${l.debit > 0 ? "مدين " + fmtMoney(l.debit) : "دائن " + fmtMoney(l.credit)}`).join(" | ")}</div>
-                </div>
-                <button onClick={() => onDelete(en.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-    </div>
-  );
-}
-
-function AccountingClosingTab({ fiscalClosings, onClose }) {
-  const [form, setForm] = useState({ date: todayISO(), label: "" });
-  const submit = (e) => { e.preventDefault(); onClose(form.date, form.label); setForm({ date: todayISO(), label: "" }); };
-
-  return (
-    <div className="space-y-4">
-      <SectionCard title="قفل فترة/سنة مالية">
-        <p className="text-xs mb-3" style={{ color: COLORS.slate }}>
-          بيتحسب صافي الإيراد والمصروفات من آخر قفل لحد التاريخ ده، وبيتقفل بقيد بيصفّر حسابات الإيراد والمصروفات ويرحّل الصافي لحساب "صافي نتيجة القسم" — عشان الفترة الجاية تبدأ من الصفر.
-        </p>
-        <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-          <Field label="تاريخ القفل" required><TextInput type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
-          <div className="md:col-span-2"><Field label="وصف الفترة"><TextInput value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="مثال: السنة المالية 2026" /></Field></div>
-          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.danger }}>قفل الفترة</button>
-        </form>
-      </SectionCard>
-
-      <SectionCard title={`سجل القفلات السابقة (${fiscalClosings.length})`}>
-        {fiscalClosings.length === 0 ? (
-          <EmptyState icon={ShieldCheck} title="لا توجد فترات مقفولة بعد" />
-        ) : (
-          <div className="space-y-2">
-            {fiscalClosings.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((c) => (
-              <div key={c.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
-                <div>
-                  <div className="font-bold">{c.label} <span className="text-xs font-normal" style={{ color: COLORS.slate }}>({c.date})</span></div>
-                  <div className="text-xs mt-1" style={{ color: COLORS.slate }}>إيراد {fmtMoney(c.revenueTotal)} — مصروفات {fmtMoney(c.expenseTotal)}</div>
-                </div>
-                <div className="font-extrabold tabular-nums" style={{ color: c.netAmount >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(c.netAmount)}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-    </div>
-  );
-}
-
-function DepartmentBankView({ bankTransactions, onAdd, onDelete }) {
-  const [showForm, setShowForm] = useState(false);
-  const empty = { owner: SOURCES[0], date: todayISO(), type: "in", description: "", amount: "" };
-  const [form, setForm] = useState(empty);
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const bank = useMemo(() => buildManualBank({ bankTransactions }), [bankTransactions]);
-  const submit = (e) => { e.preventDefault(); onAdd(form); setForm(empty); setShowForm(false); };
-
-  return (
-    <div className="space-y-6">
-      <Header
-        title="بنك القسم"
-        sub="سجل يدوي — داخل وخارج لكل شركة، بتدخله بنفسك"
-        action={
-          <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
-            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "حركة جديدة"}
-          </button>
-        }
-      />
-
-      {showForm && (
-        <SectionCard title="تسجيل حركة جديدة">
-          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-            <Field label="الشركة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
-            <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
-            <Field label="النوع" required>
-              <Select value={form.type} onChange={set("type")}>
-                <option value="in">داخل</option>
-                <option value="out">خارج</option>
-              </Select>
-            </Field>
-            <div className="md:col-span-2"><Field label="البيان"><TextInput value={form.description} onChange={set("description")} placeholder="مثال: صافي مستخلص شهر 7" /></Field></div>
-            <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
-            <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ الحركة</button>
-          </form>
-        </SectionCard>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {SOURCES.map((owner) => (
-          <div key={owner} className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
-            <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>{owner}</div>
-            <div className="text-lg font-extrabold tabular-nums" style={{ color: (bank.byOwner[owner]?.balance || 0) >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(bank.byOwner[owner]?.balance || 0)}</div>
-            <div className="text-[11px] mt-1" style={{ color: COLORS.slate }}>داخل {fmtMoney(bank.byOwner[owner]?.totalIn || 0)} — خارج {fmtMoney(bank.byOwner[owner]?.totalOut || 0)}</div>
-          </div>
-        ))}
-        <div className="p-4 rounded-xl" style={{ background: COLORS.navy }}>
-          <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.7)" }}>الرصيد الإجمالي</div>
-          <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(bank.overall)}</div>
-        </div>
-      </div>
-
-      {SOURCES.map((owner) => (
-        <SectionCard key={owner} title={`حركات ${owner}`}>
-          {(bank.byOwner[owner]?.transactions || []).length === 0 ? (
-            <EmptyState icon={Building2} title="لا توجد حركات بعد" />
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["التاريخ", "البيان", "داخل", "خارج", "الرصيد", ""].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {bank.byOwner[owner].transactions.map((t) => (
-                    <tr key={t.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{t.date || "—"}</td>
-                      <td className="px-3 py-2.5">{t.description || "—"}</td>
-                      <td className="px-3 py-2.5 tabular-nums" style={{ color: "#1B5E20" }}>{t.type !== "out" ? fmtMoney(t.amount) : ""}</td>
-                      <td className="px-3 py-2.5 tabular-nums" style={{ color: COLORS.danger }}>{t.type === "out" ? fmtMoney(t.amount) : ""}</td>
-                      <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(t.balance)}</td>
-                      <td className="px-3 py-2.5"><button onClick={() => onDelete(t.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-      ))}
-    </div>
-  );
-}
-
-function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, onDelete }) {
-  const [showForm, setShowForm] = useState(false);
-  const empty = { date: todayISO(), amount: "", notes: "" };
-  const [form, setForm] = useState(empty);
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const wallet = useMemo(() => buildOctaneWallet({ octaneTopUps, fuelRecords, equipmentCodes }), [octaneTopUps, fuelRecords, equipmentCodes]);
-
-  const submit = (e) => { e.preventDefault(); onAdd(form); setForm(empty); setShowForm(false); };
-
-  return (
-    <div className="space-y-6">
-      <Header
-        title="محفظة أوكتين (سولار وكارتات)"
-        sub="محفظة واحدة مشتركة — بتشحنها من رصيد أي شركة، وبتثبت السحب ده في بنك القسم بنفسك آخر الفترة"
-        action={
-          <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
-            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "شحن جديد"}
-          </button>
-        }
-      />
-
-      {showForm && (
-        <SectionCard title="تسجيل شحن جديد">
-          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-            <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
-            <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
-            <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
-            <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ الشحن</button>
-          </form>
-        </SectionCard>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
-          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المشحون</div>
-          <div className="text-lg font-extrabold tabular-nums">{fmtMoney(wallet.totalCharged)}</div>
-        </div>
-        <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
-          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المستهلك</div>
-          <div className="text-lg font-extrabold tabular-nums">{fmtMoney(wallet.totalSpent)}</div>
-        </div>
-        <div className="p-4 rounded-xl" style={{ background: COLORS.navy }}>
-          <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.7)" }}>المتبقي في المحفظة</div>
-          <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(wallet.totalRemaining)}</div>
-        </div>
-      </div>
-
-      <SectionCard title="الاستهلاك موزّع حسب مالك المعدة (للمعلومية)">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {wallet.spentBreakdown.map((r) => (
-            <div key={r.owner} className="flex justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
-              <span style={{ color: COLORS.slate }}>{r.owner}</span>
-              <span className="font-bold tabular-nums">{fmtMoney(r.spent)}</span>
-            </div>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard title={`سجل الشحن (${octaneTopUps.length})`}>
-        {octaneTopUps.length === 0 ? (
-          <EmptyState icon={Fuel} title="لا توجد عمليات شحن بعد" />
-        ) : (
-          <div className="space-y-2">
-            {octaneTopUps.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((t) => (
-              <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
-                <div>
-                  <div className="font-bold">{t.date}</div>
-                  {t.notes && <div className="text-xs mt-0.5" style={{ color: COLORS.slate }}>{t.notes}</div>}
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="font-extrabold tabular-nums">{fmtMoney(t.amount)}</div>
-                  <button onClick={() => onDelete(t.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-    </div>
-  );
-}
-
 function ClaimPrintView({ claims }) {
   const ownerMonths = useMemo(() => {
     const set = new Set();
