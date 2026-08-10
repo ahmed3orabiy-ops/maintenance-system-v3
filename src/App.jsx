@@ -1493,7 +1493,9 @@ export default function App() {
           #print-area table.employees-print-table td { padding: 4px 8px !important; font-size: 9px; line-height: 1.3; }
           #print-area thead { display: table-header-group; }
           #print-area table:not(.custody-print-table) tr { page-break-inside: avoid; }
-          #print-area table.custody-print-table tr { page-break-inside: avoid; }
+          /* طباعة عهدة: من غير "avoid" على الصف — لو صف واحد (زي بند بنص طويل جدًا) أطول من صفحة كاملة،
+             إجبار المتصفح يمنع القطع فيه كان بيخليه "يتوه" ويكرر نفس الصفحات من غير ما يتقدم. السماح
+             بالقطع الطبيعي هنا بيضمن إن الطباعة تكمل صح حتى لو بند واحد نصه طويل جدًا. */
           .totals-signatures-block { page-break-inside: avoid; }
           .print-page-break { page-break-before: always; break-before: page; }
           #print-area table.profit-table { font-size: 7px; }
@@ -6637,10 +6639,13 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     }
     return { ...row, _mergeStart: isNewGroup, _mergeSpan: span };
   });
+  // "خامساً - مصروفات أخرى" مش هتتدمج — الكود فيها غالبًا مش بيميّز معدة بعينها (نثريات/تكاليف عامة)،
+  // فبيتكرر عادي في كل صف بدل ما يتحط في خانة واحدة مدموجة.
+  const withoutMerge = (rows) => rows.map((row) => ({ ...row, _mergeStart: true, _mergeSpan: 1 }));
 
   const grouped = CATEGORIES.map((cat) => ({
     cat,
-    rows: withMergeInfo(sortForMerge(items.filter((e) => e.category === cat))),
+    rows: cat === "خامساً - مصروفات أخرى" ? withoutMerge(sortForMerge(items.filter((e) => e.category === cat))) : withMergeInfo(sortForMerge(items.filter((e) => e.category === cat))),
   })).filter((g) => g.rows.length > 0);
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
@@ -6772,6 +6777,14 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                     <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
                     <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
                     <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                  </tr>
+                ))}
+                {/* صفوف فاضية بنفس خطوط الأعمدة — عشان شكل الصفحة يبقى مكتمل زي دفتر محاسبة عادي، مش يوقف فجأة */}
+                {Array.from({ length: 10 }).map((_, fi) => (
+                  <tr key={`filler-${fi}`}>
+                    {Array.from({ length: 11 }).map((__, ci) => (
+                      <td key={ci} className="border px-2.5 py-2" style={{ borderColor: "#E3DDCE" }}>&nbsp;</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
