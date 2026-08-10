@@ -1428,16 +1428,16 @@ export default function App() {
         .profit-summary-grid { display: flex; flex-wrap: wrap; gap: 8px; }
         .profit-summary-box { flex: 1 1 22%; min-width: 130px; }
         @media print {
-          @page { margin: 12mm 10mm; }
+          @page { margin: 10mm 8mm; }
           body, html { background: #FFFFFF !important; }
           body * { visibility: hidden; }
           #print-area, #print-area * { visibility: visible; }
           #print-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; padding: 0; }
           #print-area table { width: 100% !important; min-width: 0 !important; table-layout: auto; }
           #print-area table:not(.custody-print-table) { border-collapse: collapse; }
-          #print-area table.custody-print-table { border-collapse: separate; border-spacing: 0; }
+          #print-area table.custody-print-table { border-collapse: collapse; }
           #print-area table.profit-table { table-layout: fixed; }
-          #print-area table.custody-print-table { table-layout: auto; }
+          #print-area table.custody-print-table { table-layout: fixed; }
           /* الجداول العادية (كل حاجة ماعدا طباعة عهدة والربحية) — تنسيق أنضف */
           #print-area table:not(.custody-print-table):not(.profit-table) { font-size: 9.5px; }
           #print-area table:not(.custody-print-table):not(.profit-table) th,
@@ -6478,9 +6478,6 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   const mergeKey = (code) => (code ? looseKey(normCode(code)) : "");
 
-  // بترتب البنود عشان بنود نفس المعدة تتجمع مع بعض بصريًا، وبعدين withMergeInfo تحت بتدمجها
-  // في خانة واحدة (rowSpan). كل قسم جدول منفصل بالـ thead بتاعه (اسم القسم + رؤوس الأعمدة)،
-  // فلو قسم اتقطع بين صفحتين، المتصفح بيكرر الـ thead ده تلقائي فوق كل صفحة جديدة.
   const sortForMerge = (rows) => {
     const withIdx = rows.map((r, i) => ({ r, i, key: mergeKey(r.equipmentCode) }));
     const firstIndex = {};
@@ -6495,23 +6492,16 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     return withIdx.map((x) => x.r);
   };
 
-  // دمج بصري طبيعي (rowSpan) للتاريخ وكود المعدة والنوع والماركة والموقع لبنود نفس المعدة —
-  // زي الشكل الأصلي، وبيتكرر تلقائي (البانر + رؤوس الأعمدة) في أول أي صفحة جديدة عن طريق thead
-  // لكل قسم، فلو قسم اتقطع بين صفحتين هيتكتب اسمه ورؤوس الأعمدة تاني في الصفحة الجديدة تلقائي.
-  const withMergeInfo = (rows) => {
-    const result = [];
-    let i = 0;
-    while (i < rows.length) {
-      const key = mergeKey(rows[i].equipmentCode);
-      if (!key) { result.push({ ...rows[i], _mergeStart: true, _mergeSpan: 1 }); i++; continue; }
-      let runEnd = i + 1;
-      while (runEnd < rows.length && mergeKey(rows[runEnd].equipmentCode) === key) runEnd++;
-      const span = runEnd - i;
-      for (let j = i; j < runEnd; j++) result.push({ ...rows[j], _mergeStart: j === i, _mergeSpan: span });
-      i = runEnd;
+  const withMergeInfo = (rows) => rows.map((row, i) => {
+    const key = mergeKey(row.equipmentCode);
+    const prevKey = i > 0 ? mergeKey(rows[i - 1].equipmentCode) : "";
+    const isNewGroup = i === 0 || !key || prevKey !== key;
+    let span = 1;
+    if (isNewGroup && key) {
+      for (let j = i + 1; j < rows.length && mergeKey(rows[j].equipmentCode) === key; j++) span++;
     }
-    return result;
-  };
+    return { ...row, _mergeStart: isNewGroup, _mergeSpan: span };
+  });
 
   const grouped = CATEGORIES.map((cat) => ({
     cat,
@@ -6519,9 +6509,6 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   })).filter((g) => g.rows.length > 0);
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
-
-  const now = new Date();
-  const printedAt = now.toLocaleString("ar-EG", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
   const handlePrint = () => {
     window.print();
@@ -6605,16 +6592,16 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
             <table key={g.cat} className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900, marginBottom: 0 }}>
               <colgroup>
                 <col style={{ width: "3%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "11%" }} />
-                <col style={{ width: "9%" }} />
-                <col style={{ width: "10%" }} />
                 <col style={{ width: "7%" }} />
-                <col style={{ width: "17%" }} />
-                <col style={{ width: "10%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "7%" }} />
                 <col style={{ width: "8%" }} />
                 <col style={{ width: "8%" }} />
-                <col style={{ width: "8%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
               </colgroup>
               <thead>
                 <tr style={{ background: "#E8C978" }}>
@@ -6629,7 +6616,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               <tbody>
                 {g.rows.map((e, i) => (
                   <tr key={e.id}>
-                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                    <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
                     {e._mergeStart && (
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
                     )}
@@ -6637,10 +6624,10 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
                     )}
                     {e._mergeStart && (
                       <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
@@ -6658,10 +6645,10 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           <div className="totals-signatures-block">
           <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
             <colgroup>
-              <col style={{ width: "3%" }} /><col style={{ width: "9%" }} /><col style={{ width: "11%" }} />
-              <col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "7%" }} />
-              <col style={{ width: "17%" }} /><col style={{ width: "10%" }} />
-              <col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
+              <col style={{ width: "3%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
+              <col style={{ width: "20%" }} /><col style={{ width: "12%" }} />
+              <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} />
             </colgroup>
             <tbody>
               <tr style={{ background: "#101A2E", color: "white" }}>
@@ -6683,16 +6670,12 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
               </div>
             ))}
           </div>
-          {userEmail && (
-            <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
-              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span> — بتاريخ {printedAt}
-            </div>
-          )}
         </div>
       )}
     </div>
   );
 }
+
 
 
 /* ============================================================
