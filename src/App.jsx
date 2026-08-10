@@ -4,6 +4,8 @@ import {
   Tooltip, ResponsiveContainer, Legend, LineChart, Line,
 } from "recharts";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 import {
   LayoutDashboard, FilePlus2, Wallet, Database, Wrench, AlertTriangle,
   Search, Trash2, X, Plus, ChevronLeft, TrendingUp, TrendingDown,
@@ -681,6 +683,111 @@ function downloadPrintableHTML(title, bodyHtml, filename) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/* ============================================================
+   تصدير PDF بترقيم صفحات إحنا اللي بنتحكم فيه بالكامل — مش المتصفح
+   ============================================================
+   الفكرة: بدل ما نسيب المتصفح يقرر فين يقفل كل صفحة (غير موثوق ومختلف من متصفح لمتصفح)،
+   بنقيس الارتفاع الحقيقي لكل صف من الـ DOM الفعلي اللي هيتصور (مش نسخة موازية تقديرية زي قبل كده)،
+   وبنقرر إحنا فين نقطع كل صفحة، وبعدين بنصوّر (html2canvas) كل جزء ونضيفه كصفحة في PDF (jsPDF).
+   عشان كده الأرقام هنا مضمونة 100% لأنها مأخوذة من نفس العنصر اللي هيتصوّر بالظبط.
+============================================================ */
+async function exportTablesToPaginatedPDF({ tables, filename, pageMarginMM = 10 }) {
+  const PAGE_W_MM = 210, PAGE_H_MM = 297; // A4
+  const contentWmm = PAGE_W_MM - pageMarginMM * 2;
+  const contentHmm = PAGE_H_MM - pageMarginMM * 2;
+  const pdf = new jsPDF("p", "mm", "a4");
+  let firstPage = true;
+
+  for (const tableInfo of tables) {
+    const { theadEl, tbodyEl, rowMeta } = tableInfo; // rowMeta: [{ el, isMergeStart, mergeKey }]
+    if (!tbodyEl || rowMeta.length === 0) continue;
+
+    const containerWidthPx = tbodyEl.offsetWidth || tbodyEl.parentElement.offsetWidth;
+    const mmPerPx = contentWmm / containerWidthPx;
+    const pageHeightPx = contentHmm / mmPerPx;
+
+    // صورة الترويسة (اسم القسم + رؤوس الأعمدة) — بتتكرر فوق كل صفحة
+    const theadCanvas = await html2canvas(theadEl, { scale: 2, backgroundColor: "#ffffff" });
+
+    // صورة كل جدول البيانات مرة واحدة (بالدمج الطبيعي بتاعه زي ما هو ظاهر في الشاشة)
+    const bodyCanvas = await html2canvas(tbodyEl, { scale: 2, backgroundColor: "#ffffff" });
+    const canvasScale = bodyCanvas.width / containerWidthPx;
+
+    // نحسب حدود كل صف بالبكسل الحقيقي (offsetTop/offsetHeight فعلي، مش تقدير)
+    let cum = 0;
+    const rowBounds = rowMeta.map((r) => {
+      const h = r.el.offsetHeight;
+      const top = cum;
+      cum += h;
+      return { top, height: h, isMergeStart: r.isMergeStart, mergeKey: r.mergeKey };
+    });
+
+    const theadHeightPx = theadEl.offsetHeight;
+    const availableBodyPxFirstPage = pageHeightPx - theadHeightPx;
+
+    // نقسّم الصفوف لصفحات: أي صف يتخطى المساحة المتاحة يبدأ صفحة جديدة (القطع دايمًا على حدود صف، أبدًا في نصه)
+    const pages = [];
+    let pageStart = 0;
+    let usedH = 0;
+    for (let i = 0; i < rowBounds.length; i++) {
+      const rh = rowBounds[i].height;
+      if (usedH > 0 && usedH + rh > availableBodyPxFirstPage) {
+        pages.push({ start: pageStart, end: i });
+        pageStart = i;
+        usedH = 0;
+      }
+      usedH += rh;
+    }
+    pages.push({ start: pageStart, end: rowBounds.length });
+
+    for (const pg of pages) {
+      if (!firstPage) pdf.addPage();
+      firstPage = false;
+
+      const sliceTopPx = rowBounds[pg.start].top;
+      const sliceBottomPx = rowBounds[pg.end - 1].top + rowBounds[pg.end - 1].height;
+      const sliceHeightPx = sliceBottomPx - sliceTopPx;
+      const needsContinuationLabel = !rowBounds[pg.start].isMergeStart && rowBounds[pg.start].mergeKey && rowMeta[pg.start].codeLabel;
+      const labelBandPx = needsContinuationLabel ? 40 : 0;
+
+      // كانفاس مؤقت: الترويسة فوق، وتحتها لابل "تابع الكود" لو محتاج، وتحتهم قصة من صورة الجدول
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = bodyCanvas.width;
+      pageCanvas.height = theadCanvas.height + labelBandPx * canvasScale + sliceHeightPx * canvasScale;
+      const ctx = pageCanvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(theadCanvas, 0, 0, theadCanvas.width, theadCanvas.height, 0, 0, pageCanvas.width, theadCanvas.height);
+
+      let bodyDrawY = theadCanvas.height;
+      if (needsContinuationLabel) {
+        ctx.save();
+        ctx.fillStyle = "#F3EEDD";
+        ctx.fillRect(0, bodyDrawY, pageCanvas.width, labelBandPx * canvasScale);
+        ctx.fillStyle = "#101A2E";
+        ctx.font = `bold ${20 * canvasScale}px Cairo, Arial, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.direction = "rtl";
+        ctx.fillText(`تابع كود المعدة: ${rowMeta[pg.start].codeLabel}`, pageCanvas.width / 2, bodyDrawY + 26 * canvasScale);
+        ctx.restore();
+        bodyDrawY += labelBandPx * canvasScale;
+      }
+
+      ctx.drawImage(
+        bodyCanvas,
+        0, sliceTopPx * canvasScale, bodyCanvas.width, sliceHeightPx * canvasScale,
+        0, bodyDrawY, pageCanvas.width, sliceHeightPx * canvasScale
+      );
+
+      const imgData = pageCanvas.toDataURL("image/png");
+      const imgHmm = (pageCanvas.height / canvasScale) * mmPerPx;
+      pdf.addImage(imgData, "PNG", pageMarginMM, pageMarginMM, contentWmm, imgHmm);
+    }
+  }
+
+  pdf.save(filename.endsWith(".pdf") ? filename : `${filename}.pdf`);
 }
 
 function exportToExcel({ expenses, custodies, revenues }) {
@@ -6471,7 +6578,10 @@ const SIGNATURES = [
 
 function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   const [custodyId, setCustodyId] = useState(custodies[0]?.id || "");
+  const [pdfLoading, setPdfLoading] = useState(false);
   const printRef = useRef(null);
+  const theadRefs = useRef({});
+  const rowRefs = useRef({});
   const custody = custodies.find((c) => c.id === custodyId);
   const items = expenses.filter((e) => e.custodyId === custodyId);
   const totals = custodyTotals[custodyId] || { spent: 0, available: 0, remaining: 0 };
@@ -6492,78 +6602,27 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     return withIdx.map((x) => x.r);
   };
 
-  // نطبّق الدمج (rowSpan) داخل قطعة واحدة بس (صفحة واحدة)، مش عبر كل بنود المعدة
-  const withMergeInfo = (rows, chunkSizes) => {
+  // دمج بصري طبيعي (rowSpan) لبنود نفس المعدة — من غير أي تقسيم صفحات يدوي هنا؛
+  // تقسيم الصفحات بقى شغل exportTablesToPaginatedPDF وقت التصدير، مش وقت العرض.
+  const withMergeInfo = (rows) => {
     const result = [];
-    let pos = 0;
-    const sizes = chunkSizes && chunkSizes.length ? chunkSizes : [rows.length];
-    sizes.forEach((size) => {
-      const section = rows.slice(pos, pos + size);
-      pos += size;
-      let i = 0;
-      while (i < section.length) {
-        const key = mergeKey(section[i].equipmentCode);
-        if (!key) {
-          result.push({ ...section[i], _mergeStart: true, _mergeSpan: 1, _chunkEnd: i === section.length - 1 });
-          i++;
-          continue;
-        }
-        let runEnd = i + 1;
-        while (runEnd < section.length && mergeKey(section[runEnd].equipmentCode) === key) runEnd++;
-        const span = runEnd - i;
-        for (let j = i; j < runEnd; j++) {
-          result.push({ ...section[j], _mergeStart: j === i, _mergeSpan: span, _chunkEnd: j === section.length - 1 });
-        }
-        i = runEnd;
-      }
-    });
+    let i = 0;
+    while (i < rows.length) {
+      const key = mergeKey(rows[i].equipmentCode);
+      if (!key) { result.push({ ...rows[i], _mergeStart: true, _mergeSpan: 1 }); i++; continue; }
+      let runEnd = i + 1;
+      while (runEnd < rows.length && mergeKey(rows[runEnd].equipmentCode) === key) runEnd++;
+      const span = runEnd - i;
+      for (let j = i; j < runEnd; j++) result.push({ ...rows[j], _mergeStart: j === i, _mergeSpan: span });
+      i = runEnd;
+    }
     return result;
   };
 
-  const groupedRaw = CATEGORIES.map((cat) => ({
+  const grouped = CATEGORIES.map((cat) => ({
     cat,
-    rawRows: sortForMerge(items.filter((e) => e.category === cat)),
-  })).filter((g) => g.rawRows.length > 0);
-
-  // ============ قياس حقيقي لارتفاع كل بند عشان نقسّم الصفحات صح ============
-  const measureRefs = useRef({});
-  const bannerRefs = useRef({});
-  const [chunkPlan, setChunkPlan] = useState({});
-  const PAGE_BUDGET_PX = 1850; // ارتفاع تقريبي متاح للجدول في صفحة A4 (بعد خصم الهوامش) — مرفوع عشان الصفحة تتملى كامل
-  const FIRST_PAGE_EXTRA_USED_PX = 300; // مساحة مستخدمة فوق أول صفحة (اللوجو + الكروت)
-  const ROW_SAFETY_MARGIN_PX = 14; // هامش أمان لكل صف عشان نتجنب إن فرق بسيط في القياس يرجع صف كامل (أو تجميعة صفوف) للصفحة اللي بعدها ويسيب فراغ
-
-  useLayoutEffect(() => {
-    const plan = {};
-    let remaining = PAGE_BUDGET_PX - FIRST_PAGE_EXTRA_USED_PX;
-    groupedRaw.forEach((g) => {
-      const els = measureRefs.current[g.cat] || [];
-      const bannerH = bannerRefs.current[g.cat]?.offsetHeight || 34;
-      if (remaining < bannerH + 40) remaining = PAGE_BUDGET_PX; // مفيش مساحة كفاية حتى للعنوان، ابدأ صفحة جديدة
-      remaining -= bannerH;
-      const chunks = [];
-      let count = 0;
-      g.rawRows.forEach((row, idx) => {
-        const h = (els[idx]?.offsetHeight || 24) + ROW_SAFETY_MARGIN_PX;
-        if (count > 0 && h > remaining) {
-          chunks.push(count);
-          remaining = PAGE_BUDGET_PX;
-          count = 0;
-        }
-        remaining -= h;
-        count++;
-      });
-      if (count > 0) chunks.push(count);
-      plan[g.cat] = chunks;
-    });
-    setChunkPlan(plan);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length, custodyId]);
-
-  const grouped = groupedRaw.map((g) => ({
-    cat: g.cat,
-    rows: withMergeInfo(g.rawRows, chunkPlan[g.cat]),
-  }));
+    rows: withMergeInfo(sortForMerge(items.filter((e) => e.category === cat))),
+  })).filter((g) => g.rows.length > 0);
 
   const sumBy = (key) => items.reduce((s, e) => s + (Number(e[key]) || 0), 0);
 
@@ -6585,6 +6644,31 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
     XLSX.writeFile(wb, `${custody?.label || "عهدة"}_${todayISO()}.xlsx`);
   };
 
+  const handlePdfExport = async () => {
+    setPdfLoading(true);
+    try {
+      const tables = grouped.map((g) => {
+        const els = rowRefs.current[g.cat] || [];
+        return {
+          theadEl: theadRefs.current[g.cat],
+          tbodyEl: els.length ? els[0].closest("tbody") : null,
+          rowMeta: g.rows.map((row, idx) => ({
+            el: els[idx],
+            isMergeStart: row._mergeStart,
+            mergeKey: mergeKey(row.equipmentCode),
+            codeLabel: row.equipmentCode || "",
+          })),
+        };
+      }).filter((t) => t.tbodyEl);
+      await exportTablesToPaginatedPDF({ tables, filename: `${custody?.label || "عهدة"}_${todayISO()}` });
+    } catch (err) {
+      console.error(err);
+      window.alert("حصلت مشكلة أثناء تجهيز الـ PDF — جرب تاني، أو استخدم زر الطباعة العادي.");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   if (custodies.length === 0) {
     return (
       <div className="space-y-6">
@@ -6596,61 +6680,18 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 
   return (
     <div className="space-y-6">
-      {/* ============ منطقة قياس مخفية: بترندر كل البنود من غير دمج عشان نقيس ارتفاعها الحقيقي ============
-          مهم: العرض والـ colgroup هنا لازم يكونوا مطابقين تمامًا لجدول الطباعة الفعلي تحت،
-          لأن أي فرق في العرض بيغيّر التفاف النص (خصوصًا عمود "الغرض من الصرف") وبالتالي الارتفاع الحقيقي،
-          وده اللي كان بيخلي الحسبة غلط ويسيب فراغ في آخر الصفحة قبل ما ينقل للصفحة اللي بعدها. */}
-      <div aria-hidden="true" style={{ position: "absolute", left: -99999, top: -99999, width: 900 }}>
-        <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
-          <colgroup>
-            <col style={{ width: "3%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "20%" }} />
-            <col style={{ width: "12%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "9%" }} />
-          </colgroup>
-          <tbody>
-            {groupedRaw.map((g) => (
-              <React.Fragment key={g.cat}>
-                <tr ref={(el) => { bannerRefs.current[g.cat] = el; }}>
-                  <td colSpan={11} className="border px-3 py-1.5 font-extrabold">{g.cat}</td>
-                </tr>
-                {g.rawRows.map((e, idx) => (
-                  <tr key={e.id} ref={(el) => { if (!measureRefs.current[g.cat]) measureRefs.current[g.cat] = []; measureRefs.current[g.cat][idx] = el; }}>
-                    <td className="border px-2.5 py-2 text-center">{idx + 1}</td>
-                    <td className="border px-2.5 py-2 text-center">{e.date}</td>
-                    <td className="border px-2.5 py-2 text-center">{e.equipmentCode || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center">{e.equipmentType || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center">{e.brand || "—"}</td>
-                    <td className="border px-2.5 py-2 text-center">{e.location || "—"}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed">{e.purpose}</td>
-                    <td className="border px-2.5 py-2 leading-relaxed">{e.notes || ""}</td>
-                    <td className="border px-2.5 py-2 text-center">{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center">{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
-                    <td className="border px-2.5 py-2 text-center">{Number(e.check) ? fmtNum(e.check) : ""}</td>
-                  </tr>
-                ))}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
       <div className="no-print">
         <Header
           title="طباعة عهدة"
-          sub="اختار العهدة وهيتجهز نموذج تصفية رسمي جاهز للطباعة"
+          sub="اختار العهدة — زرار تنزيل PDF بيبني الملف بنفسه بترقيم صفحات مضبوط ومكود المعدة متكرر صح، من غير ما يعتمد على المتصفح"
           action={
             <div className="flex flex-wrap gap-2">
               <ExportButtons onExcel={handleExcelExport} />
-              <button onClick={handlePrint} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: "#C69A3C", color: "#101A2E" }}>
-                <Printer size={16} /> طباعة / PDF
+              <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold border flex items-center gap-2" style={{ borderColor: "#E3DDCE", color: "#101A2E" }}>
+                <Printer size={16} /> طباعة (المتصفح)
+              </button>
+              <button onClick={handlePdfExport} disabled={pdfLoading} className="px-5 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: "#C69A3C", color: "#101A2E", opacity: pdfLoading ? 0.6 : 1 }}>
+                {pdfLoading ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} {pdfLoading ? "جاري التجهيز..." : "تنزيل PDF"}
               </button>
             </div>
           }
@@ -6709,7 +6750,7 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "9%" }} />
               </colgroup>
-              <thead>
+              <thead ref={(el) => { theadRefs.current[g.cat] = el; }}>
                 <tr style={{ background: "#E8C978" }}>
                   <td colSpan={11} className="border px-3 py-1.5 font-extrabold" style={{ borderColor: "#E3DDCE", color: "#101A2E" }}>{g.cat}</td>
                 </tr>
@@ -6719,52 +6760,33 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                   ))}
                 </tr>
               </thead>
-              {(() => {
-                const chunks = [];
-                g.rows.forEach((row) => {
-                  if (chunks.length === 0) chunks.push([row]);
-                  else chunks[chunks.length - 1].push(row);
-                  if (row._chunkEnd) chunks.push([]);
-                });
-                if (chunks.length && chunks[chunks.length - 1].length === 0) chunks.pop();
-                let runningIndex = 0;
-                return chunks.map((chunk, ci) => {
-                  const startIndex = runningIndex;
-                  runningIndex += chunk.length;
-                  return (
-                    <tbody key={ci} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                      {chunk.map((e, localI) => {
-                        const i = startIndex + localI;
-                        return (
-                          <tr key={e.id}>
-                            <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
-                            {e._mergeStart && (
-                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
-                            )}
-                            {e._mergeStart && (
-                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
-                            )}
-                            {e._mergeStart && (
-                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
-                            )}
-                            {e._mergeStart && (
-                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
-                            )}
-                            {e._mergeStart && (
-                              <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
-                            )}
-                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
-                            <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
-                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
-                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
-                            <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  );
-                });
-              })()}
+              <tbody>
+                {g.rows.map((e, i) => (
+                  <tr key={e.id} ref={(el) => { if (!rowRefs.current[g.cat]) rowRefs.current[g.cat] = []; rowRefs.current[g.cat][i] = el; }}>
+                    <td className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
+                    {e._mergeStart && (
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
+                    )}
+                    {e._mergeStart && (
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                    )}
+                    {e._mergeStart && (
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                    )}
+                    {e._mergeStart && (
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                    )}
+                    {e._mergeStart && (
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
+                    )}
+                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
+                    <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.cash) ? fmtNum(e.cash) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.transfer) ? fmtNum(e.transfer) : ""}</td>
+                    <td className="border px-2.5 py-2 text-center tabular-nums" style={{ borderColor: "#E3DDCE" }}>{Number(e.check) ? fmtNum(e.check) : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           ))}
           <div className="totals-signatures-block">
@@ -6806,9 +6828,6 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
   );
 }
 
-/* ============================================================
-   طباعة مستخلص
-============================================================ */
 /* ============================================================
    المحاسبة — الشاشة
 ============================================================ */
