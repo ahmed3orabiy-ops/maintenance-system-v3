@@ -6731,17 +6731,17 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           {grouped.map((g) => (
             <table key={g.cat} className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900, marginBottom: 0 }}>
               <colgroup>
-                <col style={{ width: "3%" }} />
+                <col style={{ width: "4%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "11%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "9%" }} />
                 <col style={{ width: "7%" }} />
-                <col style={{ width: "8%" }} />
-                <col style={{ width: "7%" }} />
-                <col style={{ width: "8%" }} />
-                <col style={{ width: "8%" }} />
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "12%" }} />
+                <col style={{ width: "16%" }} />
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "9%" }} />
                 <col style={{ width: "9%" }} />
+                <col style={{ width: "8%" }} />
               </colgroup>
               <thead>
                 <tr style={{ background: "#E8C978" }}>
@@ -6758,19 +6758,19 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
                   <tr key={e.id}>
                     <td className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE" }}>{i + 1}</td>
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.date}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE", verticalAlign: "middle" }}>{e.date}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle whitespace-nowrap" style={{ borderColor: "#E3DDCE" }}>{e.equipmentCode || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center whitespace-nowrap" style={{ borderColor: "#E3DDCE", verticalAlign: "middle" }}>{e.equipmentCode || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.equipmentType || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE", verticalAlign: "middle" }}>{e.equipmentType || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.brand || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE", verticalAlign: "middle" }}>{e.brand || "—"}</td>
                     )}
                     {e._mergeStart && (
-                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center align-middle" style={{ borderColor: "#E3DDCE" }}>{e.location || "—"}</td>
+                      <td rowSpan={e._mergeSpan} className="border px-2.5 py-2 text-center" style={{ borderColor: "#E3DDCE", verticalAlign: "middle" }}>{e.location || "—"}</td>
                     )}
                     <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.purpose}</td>
                     <td className="border px-2.5 py-2 leading-relaxed" style={{ borderColor: "#E3DDCE" }}>{e.notes || ""}</td>
@@ -6785,10 +6785,10 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
           <div className="totals-signatures-block">
           <table className="w-full border-collapse text-xs custody-print-table" style={{ minWidth: 900 }}>
             <colgroup>
-              <col style={{ width: "3%" }} /><col style={{ width: "7%" }} /><col style={{ width: "8%" }} />
-              <col style={{ width: "7%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} />
-              <col style={{ width: "20%" }} /><col style={{ width: "12%" }} />
-              <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} />
+              <col style={{ width: "4%" }} /><col style={{ width: "10%" }} /><col style={{ width: "11%" }} />
+              <col style={{ width: "8%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} />
+              <col style={{ width: "16%" }} /><col style={{ width: "9%" }} />
+              <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} />
             </colgroup>
             <tbody>
               <tr style={{ background: "#101A2E", color: "white" }}>
