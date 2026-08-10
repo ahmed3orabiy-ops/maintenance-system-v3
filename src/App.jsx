@@ -89,13 +89,15 @@ const CHART_COLORS = ["#101A2E", "#C69A3C", "#5B7A9E", "#8B9C6E", "#B5453A", "#6
 const ACCOUNT_TYPE_LABELS = { asset: "أصول", liability: "خصوم", equity: "حقوق ملكية", revenue: "إيرادات", expense: "مصروفات" };
 
 const CHART_OF_ACCOUNTS = [
-  { code: "1010", name: "البنك", type: "asset" },
+  { code: "1010", name: "بنك القسم (صيانة وتشغيل)", type: "asset" },
   { code: "1100", name: "عهدة تحت التصفية", type: "asset" },
-  { code: "1200", name: "إيرادات تأجير مستحقة", type: "asset" },
+  { code: "1150", name: "محفظة أوكتين (سولار)", type: "asset" },
+  { code: "1200", name: "إيرادات تأجير مستحقة (مستخلصات)", type: "asset" },
   { code: "4000", name: "إيراد تأجير معدات", type: "revenue" },
   { code: "5100", name: "مصروفات صيانة وتشغيل السيارات", type: "expense" },
   { code: "5200", name: "مصروفات صيانة المعدات", type: "expense" },
   { code: "5900", name: "مصروفات أخرى", type: "expense" },
+  { code: "5950", name: "خصومات مستخلص (مرتبات وسلف مدفوعة من الشركة)", type: "expense" },
   { code: "3000", name: "صافي نتيجة القسم (أرباح/خسائر مرحّلة)", type: "equity" },
 ];
 const ACCOUNT_BY_CODE = Object.fromEntries(CHART_OF_ACCOUNTS.map((a) => [a.code, a]));
@@ -106,15 +108,74 @@ const EXPENSE_ACCOUNT_BY_CATEGORY = {
   "ثانياً - صيانة المعدات": "5200",
   "خامساً - مصروفات أخرى": "5900",
 };
-const expenseAccountForCategory = (cat) => EXPENSE_ACCOUNT_BY_CATEGORY[cat] || "5900";
+const expenseAccountForCategory = (cat, accountsList) => {
+  const preferred = EXPENSE_ACCOUNT_BY_CATEGORY[cat] || "5900";
+  if (!accountsList || !accountsList.length) return preferred;
+  if (accountsList.some((a) => a.code === preferred)) return preferred;
+  const fallback = accountsList.find((a) => a.type === "expense");
+  return fallback ? fallback.code : preferred;
+};
 
-// بيبني كل القيود المزدوجة من بيانات النظام الحالية (عهد + مصروفات + إيرادات)
+// بيبني كل القيود المزدوجة من بيانات النظام الحالية
+// المسار الحقيقي: مستخلص (إيراد) → خصومات الشركة (مرتبات/سلف) → الصافي بيدخل بنك القسم →
+// عهدة نقدية تتسحب من بنك القسم → تتصرف على المعدات. + محفظة أوكتين: شحن من بنك القسم، واستهلاك سولار منها.
 // كل قيد = { id, date, ref, desc, equipmentCode, source, lines:[{account, debit, credit}] }
-function buildJournalEntries({ custodies = [], expenses = [], revenues = [] }) {
+function buildJournalEntries({
+  custodies = [], expenses = [], claims = [], claimDeductions = [], octaneTopUps = [],
+  fuelRecords = [], equipmentCodes = [], accounts: accountsList = CHART_OF_ACCOUNTS,
+}) {
   const entries = [];
   const custodyById = Object.fromEntries((custodies || []).map((c) => [c.id, c]));
+  const ownerByCode = {};
+  (equipmentCodes || []).forEach((c) => { if (c.code) ownerByCode[normCode(c.code)] = c.owner; });
 
-  // 1) تحويل عهدة من البنك للقسم → مدين "عهدة تحت التصفية" / دائن "البنك"
+  // 1) كل بند مستخلص (سطر معدة في شهر معيّن) → مدين "إيرادات تأجير مستحقة" / دائن "إيراد تأجير معدات"
+  (claims || []).forEach((c) => {
+    const amt = Number(c.total) || 0;
+    if (amt <= 0) return;
+    entries.push({
+      id: `claim-${c.id}`, date: c.claimMonth ? `${c.claimMonth}-15` : "", ref: c.equipmentCode || "",
+      desc: `مستخلص ${c.owner || ""} — ${c.equipmentCode || ""} (${c.claimMonth || ""})`,
+      equipmentCode: c.equipmentCode || "", source: c.owner || "",
+      lines: [{ account: "1200", debit: amt, credit: 0 }, { account: "4000", debit: 0, credit: amt }],
+    });
+  });
+
+  // 2) خصم من المستخلص (مرتب/سلفة/سولار دفعته الشركة) → مدين "خصومات مستخلص" / دائن "إيرادات تأجير مستحقة" (بينقص المستحق)
+  (claimDeductions || []).forEach((d) => {
+    const amt = Number(d.amount) || 0;
+    if (amt <= 0) return;
+    entries.push({
+      id: `claimded-${d.id}`, date: d.claimMonth ? `${d.claimMonth}-20` : "", ref: d.type || "خصم",
+      desc: `خصم مستخلص ${d.owner || ""} — ${d.type || ""} — ${d.description || ""}`,
+      equipmentCode: "", source: d.owner || "",
+      lines: [{ account: "5950", debit: amt, credit: 0 }, { account: "1200", debit: 0, credit: amt }],
+    });
+  });
+
+  // 3) الصافي المُحوّل فعليًا لبنك القسم لكل شركة/شهر = إجمالي مستخلصات الشهر ناقص خصوماته
+  const claimGroups = {};
+  (claims || []).forEach((c) => {
+    if (!c.owner || !c.claimMonth) return;
+    const k = `${c.owner}|||${c.claimMonth}`;
+    claimGroups[k] = (claimGroups[k] || 0) + (Number(c.total) || 0);
+  });
+  (claimDeductions || []).forEach((d) => {
+    if (!d.owner || !d.claimMonth) return;
+    const k = `${d.owner}|||${d.claimMonth}`;
+    claimGroups[k] = (claimGroups[k] || 0) - (Number(d.amount) || 0);
+  });
+  Object.entries(claimGroups).forEach(([k, net]) => {
+    if (net <= 0) return;
+    const [owner, claimMonth] = k.split("|||");
+    entries.push({
+      id: `claimnet-${k}`, date: `${claimMonth}-25`, ref: "تحويل صافي مستخلص",
+      desc: `صافي مستخلص ${owner} — ${claimMonth} وصل بنك القسم`, equipmentCode: "", source: owner,
+      lines: [{ account: "1010", debit: net, credit: 0 }, { account: "1200", debit: 0, credit: net }],
+    });
+  });
+
+  // 4) تحويل عهدة من بنك القسم → مدين "عهدة تحت التصفية" / دائن "بنك القسم"
   (custodies || []).forEach((c) => {
     const amt = Number(c.transfersIn) || 0;
     if (amt <= 0) return;
@@ -125,12 +186,12 @@ function buildJournalEntries({ custodies = [], expenses = [], revenues = [] }) {
     });
   });
 
-  // 2) كل بند صرف → مدين حساب المصروف (حسب التصنيف) / دائن "عهدة تحت التصفية"
+  // 5) كل بند صرف من العهدة → مدين حساب المصروف (حسب التصنيف) / دائن "عهدة تحت التصفية"
   (expenses || []).forEach((e) => {
     const amt = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
     if (amt <= 0) return;
     const custody = custodyById[e.custodyId];
-    const acc = expenseAccountForCategory(e.category);
+    const acc = expenseAccountForCategory(e.category, accountsList);
     entries.push({
       id: `expense-${e.id}`, date: e.date || "", ref: e.equipmentCode || "", desc: e.purpose || e.category || "بند صرف",
       equipmentCode: e.equipmentCode || "", source: custody?.source || e.source || "",
@@ -138,15 +199,26 @@ function buildJournalEntries({ custodies = [], expenses = [], revenues = [] }) {
     });
   });
 
-  // 3) كل بند إيراد تأجير معدة → مدين "إيرادات تأجير مستحقة" / دائن "إيراد تأجير معدات"
-  (revenues || []).forEach((r) => {
-    const amt = Number(r.total ?? r.amount) || 0;
+  // 6) شحن محفظة أوكتين من بنك القسم → مدين "محفظة أوكتين" / دائن "بنك القسم"
+  (octaneTopUps || []).forEach((t) => {
+    const amt = Number(t.amount) || 0;
     if (amt <= 0) return;
     entries.push({
-      id: `revenue-${r.id}`, date: r.month ? `${r.month}-01` : (r.date || ""), ref: r.equipmentCode || "",
-      desc: `إيراد تأجير ${r.equipmentCode || ""} — ${r.location || r.owner || ""}`,
-      equipmentCode: r.equipmentCode || "", source: r.owner || "",
-      lines: [{ account: "1200", debit: amt, credit: 0 }, { account: "4000", debit: 0, credit: amt }],
+      id: `octanetop-${t.id}`, date: t.date || "", ref: "شحن محفظة أوكتين",
+      desc: `شحن محفظة أوكتين — ${t.owner || ""}${t.notes ? " — " + t.notes : ""}`, equipmentCode: "", source: t.owner || "",
+      lines: [{ account: "1150", debit: amt, credit: 0 }, { account: "1010", debit: 0, credit: amt }],
+    });
+  });
+
+  // 7) استهلاك سولار فعلي من محفظة أوكتين → مدين "مصروفات صيانة وتشغيل السيارات" / دائن "محفظة أوكتين"
+  (fuelRecords || []).forEach((r) => {
+    const amt = Number(r.total) || 0;
+    if (amt <= 0) return;
+    const owner = ownerByCode[normCode(r.code)] || "";
+    entries.push({
+      id: `fuel-${r.id}`, date: r.date || "", ref: r.code || "", desc: `سولار — ${r.code || ""}`,
+      equipmentCode: r.code || "", source: owner,
+      lines: [{ account: "5100", debit: amt, credit: 0 }, { account: "1150", debit: 0, credit: amt }],
     });
   });
 
@@ -167,15 +239,16 @@ function buildLedgerForAccount(entries, accountCode) {
 }
 
 // ميزان المراجعة: إجمالي مدين/دائن/رصيد لكل حساب
-function buildTrialBalance(entries) {
+function buildTrialBalance(entries, accountsList) {
+  const list = accountsList && accountsList.length ? accountsList : CHART_OF_ACCOUNTS;
   const totals = {};
-  CHART_OF_ACCOUNTS.forEach((a) => { totals[a.code] = { debit: 0, credit: 0 }; });
+  list.forEach((a) => { totals[a.code] = { debit: 0, credit: 0 }; });
   entries.forEach((en) => en.lines.forEach((l) => {
     if (!totals[l.account]) totals[l.account] = { debit: 0, credit: 0 };
     totals[l.account].debit += Number(l.debit) || 0;
     totals[l.account].credit += Number(l.credit) || 0;
   }));
-  return CHART_OF_ACCOUNTS.map((a) => {
+  return list.map((a) => {
     const t = totals[a.code] || { debit: 0, credit: 0 };
     const balance = t.debit - t.credit;
     return { ...a, debit: t.debit, credit: t.credit, balance };
@@ -183,13 +256,16 @@ function buildTrialBalance(entries) {
 }
 
 // قائمة الدخل + الربحية لكل كود معدة (المعدة كمركز تكلفة/مشروع)
-function buildIncomeStatement(entries) {
-  const revenueTotal = entries.reduce((s, en) => s + en.lines.filter((l) => l.account === "4000").reduce((s2, l) => s2 + (Number(l.credit) || 0), 0), 0);
+function buildIncomeStatement(entries, accountsList) {
+  const list = accountsList && accountsList.length ? accountsList : CHART_OF_ACCOUNTS;
+  const accByCode = Object.fromEntries(list.map((a) => [a.code, a]));
+  const revenueAccountCodes = new Set(list.filter((a) => a.type === "revenue").map((a) => a.code));
+  const revenueTotal = entries.reduce((s, en) => s + en.lines.filter((l) => revenueAccountCodes.has(l.account)).reduce((s2, l) => s2 + (Number(l.credit) || 0) - (Number(l.debit) || 0), 0), 0);
   const expenseByAccount = {};
   entries.forEach((en) => en.lines.forEach((l) => {
-    const acc = ACCOUNT_BY_CODE[l.account];
-    if (acc && acc.type === "expense" && Number(l.debit) > 0) {
-      expenseByAccount[l.account] = (expenseByAccount[l.account] || 0) + Number(l.debit);
+    const acc = accByCode[l.account];
+    if (acc && acc.type === "expense") {
+      expenseByAccount[l.account] = (expenseByAccount[l.account] || 0) + (Number(l.debit) || 0) - (Number(l.credit) || 0);
     }
   }));
   const expenseTotal = Object.values(expenseByAccount).reduce((s, v) => s + v, 0);
@@ -199,9 +275,9 @@ function buildIncomeStatement(entries) {
     const code = en.equipmentCode || "بدون كود / عام";
     if (!byCode[code]) byCode[code] = { revenue: 0, expense: 0 };
     en.lines.forEach((l) => {
-      if (l.account === "4000") byCode[code].revenue += Number(l.credit) || 0;
-      const acc = ACCOUNT_BY_CODE[l.account];
-      if (acc && acc.type === "expense") byCode[code].expense += Number(l.debit) || 0;
+      if (revenueAccountCodes.has(l.account)) byCode[code].revenue += (Number(l.credit) || 0) - (Number(l.debit) || 0);
+      const acc = accByCode[l.account];
+      if (acc && acc.type === "expense") byCode[code].expense += (Number(l.debit) || 0) - (Number(l.credit) || 0);
     });
   });
   const byEquipment = Object.entries(byCode)
@@ -211,10 +287,93 @@ function buildIncomeStatement(entries) {
 
   return {
     revenueTotal, expenseTotal, net: revenueTotal - expenseTotal,
-    expenseLines: CHART_OF_ACCOUNTS.filter((a) => a.type === "expense").map((a) => ({ ...a, amount: expenseByAccount[a.code] || 0 })),
+    expenseLines: list.filter((a) => a.type === "expense").map((a) => ({ ...a, amount: expenseByAccount[a.code] || 0 })),
     byEquipment,
   };
 }
+
+// الميزانية العمومية: الأصول مقابل (الخصوم + حقوق الملكية)
+function buildBalanceSheet(entries, accountsList) {
+  const tb = buildTrialBalance(entries, accountsList);
+  const assets = tb.filter((a) => a.type === "asset");
+  const liabilities = tb.filter((a) => a.type === "liability");
+  const equity = tb.filter((a) => a.type === "equity");
+  const totalAssets = assets.reduce((s, a) => s + a.balance, 0);
+  const totalLiabilities = liabilities.reduce((s, a) => s - a.balance, 0); // الخصوم رصيدها الطبيعي دائن (سالب في balance=debit-credit)
+  const totalEquity = equity.reduce((s, a) => s - a.balance, 0);
+  return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity, isBalanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 1 };
+}
+
+// بنك القسم: رصيد كل شركة لوحدها (داخل من صافي المستخلصات، خارج للعهد وشحن أوكتين) + رصيد إجمالي
+function buildDepartmentBank({ claims = [], claimDeductions = [], custodies = [], octaneTopUps = [] }) {
+  const claimGroups = {};
+  (claims || []).forEach((c) => {
+    if (!c.owner || !c.claimMonth) return;
+    const k = `${c.owner}|||${c.claimMonth}`;
+    claimGroups[k] = (claimGroups[k] || 0) + (Number(c.total) || 0);
+  });
+  (claimDeductions || []).forEach((d) => {
+    if (!d.owner || !d.claimMonth) return;
+    const k = `${d.owner}|||${d.claimMonth}`;
+    claimGroups[k] = (claimGroups[k] || 0) - (Number(d.amount) || 0);
+  });
+
+  const txByOwner = {};
+  const pushTx = (owner, tx) => { if (!owner) return; (txByOwner[owner] = txByOwner[owner] || []).push(tx); };
+
+  Object.entries(claimGroups).forEach(([k, net]) => {
+    if (net <= 0) return;
+    const [owner, claimMonth] = k.split("|||");
+    pushTx(owner, { date: `${claimMonth}-25`, desc: `صافي مستخلص ${claimMonth}`, in: net, out: 0 });
+  });
+  (custodies || []).forEach((c) => {
+    const amt = Number(c.transfersIn) || 0;
+    if (amt <= 0 || !c.source) return;
+    pushTx(c.source, { date: c.periodFrom || "", desc: `عهدة نقدية — ${c.label || ""}`, in: 0, out: amt });
+  });
+  (octaneTopUps || []).forEach((t) => {
+    const amt = Number(t.amount) || 0;
+    if (amt <= 0 || !t.owner) return;
+    pushTx(t.owner, { date: t.date || "", desc: `شحن محفظة أوكتين${t.notes ? " — " + t.notes : ""}`, in: 0, out: amt });
+  });
+
+  const byOwner = {};
+  SOURCES.forEach((owner) => {
+    const txs = (txByOwner[owner] || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    let running = 0;
+    const withBalance = txs.map((t) => { running += t.in - t.out; return { ...t, balance: running }; });
+    const totalIn = txs.reduce((s, t) => s + t.in, 0);
+    const totalOut = txs.reduce((s, t) => s + t.out, 0);
+    byOwner[owner] = { transactions: withBalance, totalIn, totalOut, balance: totalIn - totalOut };
+  });
+  const overall = Object.values(byOwner).reduce((s, o) => s + o.balance, 0);
+  return { byOwner, overall };
+}
+
+// محفظة أوكتين: المشحون والمستهلك والمتبقي لكل شركة (بيتحدد صاحب السولار من كود المعدة)
+function buildOctaneWallet({ octaneTopUps = [], fuelRecords = [], equipmentCodes = [] }) {
+  const ownerByCode = {};
+  (equipmentCodes || []).forEach((c) => { if (c.code) ownerByCode[normCode(c.code)] = c.owner; });
+
+  const byOwner = {};
+  SOURCES.forEach((owner) => { byOwner[owner] = { charged: 0, spent: 0 }; });
+  (octaneTopUps || []).forEach((t) => {
+    if (!t.owner) return;
+    if (!byOwner[t.owner]) byOwner[t.owner] = { charged: 0, spent: 0 };
+    byOwner[t.owner].charged += Number(t.amount) || 0;
+  });
+  (fuelRecords || []).forEach((r) => {
+    const owner = ownerByCode[normCode(r.code)];
+    if (!owner) return;
+    if (!byOwner[owner]) byOwner[owner] = { charged: 0, spent: 0 };
+    byOwner[owner].spent += Number(r.total) || 0;
+  });
+  const rows = Object.entries(byOwner).map(([owner, v]) => ({ owner, charged: v.charged, spent: v.spent, remaining: v.charged - v.spent }));
+  const totalCharged = rows.reduce((s, r) => s + r.charged, 0);
+  const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
+  return { rows, totalCharged, totalSpent, totalRemaining: totalCharged - totalSpent };
+}
+
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -611,19 +770,30 @@ export default function App() {
   const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
   const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
   const [claims, saveClaims, claimsLoaded] = useStorage("claims", []);
-  const [revenues, saveRevenues, revenuesLoaded] = useStorage("revenues", []);
+  const [claimDeductions, saveClaimDeductions, claimDeductionsLoaded] = useStorage("claimDeductions", []);
+  const [octaneTopUps, saveOctaneTopUps, octaneTopUpsLoaded] = useStorage("octaneTopUps", []);
+  // "الإيرادات" اتلغت كإدخال يدوي — بقى إيراد كل معدة بيتحسب مباشرة من المستخلصات (claims) عشان يفضل مصدر واحد للحقيقة
+  const revenues = useMemo(() => claims.map((c) => ({
+    id: c.id, equipmentCode: c.equipmentCode, owner: c.owner, source: c.owner, renter: c.owner,
+    location: c.location, month: c.claimMonth, startMonth: c.claimMonth,
+    total: Number(c.total) || 0, amount: Number(c.total) || 0, months: 1, monthlyRate: c.monthlyRate, notes: c.notes,
+  })), [claims]);
   const [fuelRecords, saveFuelRecords, fuelLoaded] = useStorage("fuelRecords", []);
   const [oilRecords, saveOilRecords, oilLoaded] = useStorage("oilRecords", []);
   const [equipmentCodes, saveEquipmentCodes, codesLoaded] = useStorage("equipmentCodes", []);
   const [salaries, saveSalaries, salariesLoaded] = useStorage("salaries", []);
+  const [accounts, saveAccounts, accountsLoaded] = useStorage("accounts", CHART_OF_ACCOUNTS);
+  const [manualJournalEntries, saveManualJournalEntries, manualEntriesLoaded] = useStorage("manualJournalEntries", []);
+  const [fiscalClosings, saveFiscalClosings, fiscalClosingsLoaded] = useStorage("fiscalClosings", []);
   const [view, setView] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const v = params.get("view");
       const validViews = [
-        "home", "dashboard", "analysis", "revenueAnalysis", "entry", "revenue", "custodies",
+        "home", "dashboard", "analysis", "revenueAnalysis", "entry", "custodies",
         "database", "equipment", "profitability", "maintenanceLog", "fuel", "oils", "fuelAnalysis",
         "equipmentCodes", "salaries", "print", "alerts", "import", "export",
+        "accounting", "departmentBank", "octaneWallet", "claimDeductions",
       ];
       if (v && validViews.includes(v)) return v;
     } catch (e) {}
@@ -656,8 +826,10 @@ export default function App() {
 
   const [lastAction, setLastAction] = useState(null);
   const storeSavers = {
-    expenses: saveExpenses, custodies: saveCustodies, revenues: saveRevenues,
+    expenses: saveExpenses, custodies: saveCustodies,
     fuelRecords: saveFuelRecords, oilRecords: saveOilRecords, equipmentCodes: saveEquipmentCodes, salaries: saveSalaries,
+    accounts: saveAccounts, manualJournalEntries: saveManualJournalEntries, fiscalClosings: saveFiscalClosings,
+    claimDeductions: saveClaimDeductions, octaneTopUps: saveOctaneTopUps, claims: saveClaims,
   };
   const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
   const pushUndoMulti = (entries) => setLastAction(entries);
@@ -680,6 +852,77 @@ export default function App() {
   };
 
   const isCustodyApproved = (custodyId) => custodies.some((c) => c.id === custodyId && c.approved);
+
+  /* ============ المحاسبة: دليل الحسابات القابل للتعديل ============ */
+  const addAccount = (acc) => {
+    if (!acc.code || !acc.name) { showToast("كود الحساب واسمه مطلوبين", "danger"); return; }
+    if (accounts.some((a) => a.code === acc.code)) { showToast("كود الحساب ده موجود بالفعل", "danger"); return; }
+    pushUndo("accounts", accounts);
+    saveAccounts([...accounts, { code: acc.code, name: acc.name, type: acc.type }]);
+    logAudit("إضافة", "حساب محاسبي", `${acc.code} - ${acc.name}`);
+    showToast("تم إضافة الحساب");
+  };
+  const updateAccount = (code, updates) => {
+    pushUndo("accounts", accounts);
+    saveAccounts(accounts.map((a) => (a.code === code ? { ...a, ...updates } : a)));
+    logAudit("تعديل", "حساب محاسبي", code);
+    showToast("تم تعديل الحساب");
+  };
+  const deleteAccount = (code) => {
+    const inUse = manualJournalEntries.some((en) => en.lines.some((l) => l.account === code))
+      || Object.values(EXPENSE_ACCOUNT_BY_CATEGORY).includes(code) || ["1010", "1100", "1200", "4000", "3000"].includes(code);
+    if (inUse) { showToast("الحساب ده مستخدم في قيود أو مرتبط بتصنيف — مينفعش يتحذف", "danger"); return; }
+    pushUndo("accounts", accounts);
+    saveAccounts(accounts.filter((a) => a.code !== code));
+    logAudit("حذف", "حساب محاسبي", code);
+    showToast("تم حذف الحساب", "danger");
+  };
+
+  /* ============ المحاسبة: قيود يدوية مباشرة (مدين/دائن) ============ */
+  const addManualJournalEntry = (entry) => {
+    const totalDebit = entry.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+    const totalCredit = entry.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01 || totalDebit <= 0) {
+      showToast("القيد مش متوازن — إجمالي المدين لازم يساوي إجمالي الدائن", "danger");
+      return;
+    }
+    pushUndo("manualJournalEntries", manualJournalEntries);
+    const record = { id: uid(), date: entry.date, desc: entry.desc, equipmentCode: entry.equipmentCode || "", isManual: true, lines: entry.lines };
+    saveManualJournalEntries([...manualJournalEntries, record]);
+    logAudit("إضافة", "قيد يدوي", `${entry.desc} — ${fmtMoney(totalDebit)}`);
+    showToast("تم حفظ القيد");
+  };
+  const deleteManualJournalEntry = (id) => {
+    pushUndo("manualJournalEntries", manualJournalEntries);
+    saveManualJournalEntries(manualJournalEntries.filter((e) => e.id !== id));
+    logAudit("حذف", "قيد يدوي", id);
+    showToast("تم حذف القيد", "danger");
+  };
+
+  /* ============ المحاسبة: قفل السنة/الفترة المالية ============ */
+  const closeFiscalPeriod = (closingDate, label) => {
+    const autoEntries = buildJournalEntries({ custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts });
+    const allEntries = [...autoEntries, ...manualJournalEntries, ...fiscalClosings.map(closingToEntry)]
+      .filter((en) => (en.date || "") <= closingDate);
+    const stmt = buildIncomeStatement(allEntries, accounts);
+    if (stmt.revenueTotal === 0 && stmt.expenseTotal === 0) {
+      showToast("مفيش نشاط ليقفل في الفترة دي", "danger");
+      return;
+    }
+    const lines = [];
+    if (stmt.revenueTotal > 0) lines.push({ account: "4000", debit: stmt.revenueTotal, credit: 0 });
+    stmt.expenseLines.filter((l) => l.amount > 0).forEach((l) => lines.push({ account: l.code, debit: 0, credit: l.amount }));
+    const net = stmt.revenueTotal - stmt.expenseTotal;
+    if (net >= 0) lines.push({ account: "3000", debit: 0, credit: net });
+    else lines.push({ account: "3000", debit: -net, credit: 0 });
+
+    pushUndo("fiscalClosings", fiscalClosings);
+    const record = { id: uid(), date: closingDate, label: label || `قفل حتى ${closingDate}`, revenueTotal: stmt.revenueTotal, expenseTotal: stmt.expenseTotal, netAmount: net, lines };
+    saveFiscalClosings([...fiscalClosings, record]);
+    logAudit("قفل فترة مالية", "محاسبة", `${record.label} — صافي ${fmtMoney(net)}`);
+    showToast("تم قفل الفترة المالية وترحيل صافي النتيجة لحساب حقوق الملكية");
+  };
+  const closingToEntry = (c) => ({ id: `closing-${c.id}`, date: c.date, desc: `قيد قفل فترة — ${c.label}`, equipmentCode: "", isClosing: true, lines: c.lines });
 
   const addExpense = (entry) => {
     if (isCustodyApproved(entry.custodyId)) {
@@ -723,48 +966,6 @@ export default function App() {
     saveExpenses(expenses.map((e) => (e.id === id ? { ...e, loadedAmount } : e)));
     logAudit("تعديل", "مصروف", `تحديث المبلغ المحمّل إلى ${fmtMoney(loadedAmount)}`);
     showToast("تم تحديث المبلغ المحمّل");
-  };
-
-  const addRevenue = (entry) => {
-    pushUndo("revenues", revenues);
-    const total = Number(entry.amount) || 0;
-    const record = {
-      ...entry,
-      location: cleanText(entry.location),
-      total,
-      startMonth: entry.month, // توافق مع تاب تحليل الإيرادات وربحية المعدات
-      months: 1,
-      monthlyRate: total,
-      id: uid(),
-    };
-    saveRevenues([...revenues, record]);
-    logAudit("إضافة", "إيراد", `${entry.owner || ""} — ${entry.equipmentCode || "بند إيراد"} — ${fmtMoney(total)}`);
-    showToast("تم حفظ بند الإيراد بنجاح");
-  };
-
-  const updateRevenue = (id, entry) => {
-    const r0 = revenues.find((x) => x.id === id);
-    pushUndo("revenues", revenues);
-    const total = Number(entry.amount) || 0;
-    saveRevenues(revenues.map((r) => (r.id === id ? {
-      ...r,
-      ...entry,
-      location: cleanText(entry.location),
-      total,
-      startMonth: entry.month,
-      months: 1,
-      monthlyRate: total,
-    } : r)));
-    logAudit("تعديل", "إيراد", r0 ? (r0.equipmentCode || "بند إيراد") : id);
-    showToast("تم تعديل بند الإيراد");
-  };
-
-  const deleteRevenue = (id) => {
-    const r = revenues.find((x) => x.id === id);
-    pushUndo("revenues", revenues);
-    saveRevenues(revenues.filter((r) => r.id !== id));
-    logAudit("حذف", "إيراد", r ? (r.equipmentCode || "بند إيراد") : id);
-    showToast("تم حذف بند الإيراد", "danger");
   };
 
   const addFuelRecord = (rec) => {
@@ -867,7 +1068,7 @@ export default function App() {
       { storeKey: "expenses", prevValue: expenses },
       { storeKey: "fuelRecords", prevValue: fuelRecords },
       { storeKey: "oilRecords", prevValue: oilRecords },
-      { storeKey: "revenues", prevValue: revenues },
+      { storeKey: "claims", prevValue: claims },
       { storeKey: "equipmentCodes", prevValue: equipmentCodes },
     ]);
     const oldSet = new Set(oldSpellings.map((s) => normCode(s)));
@@ -876,7 +1077,7 @@ export default function App() {
     saveExpenses(expenses.map((e) => (matches(e.equipmentCode) ? { ...e, equipmentCode: canonical } : e)));
     saveFuelRecords(fuelRecords.map((r) => (matches(r.code) ? { ...r, code: canonical } : r)));
     saveOilRecords(oilRecords.map((r) => (matches(r.equipmentCode) ? { ...r, equipmentCode: canonical } : r)));
-    saveRevenues(revenues.map((r) => (matches(r.equipmentCode) ? { ...r, equipmentCode: canonical } : r)));
+    saveClaims(claims.map((c) => (matches(c.equipmentCode) ? { ...c, equipmentCode: canonical } : c)));
     // في أكواد المعدات: سيب سجل واحد بس بالإملاء الموحّد، واحذف الباقي
     const seenCanonical = { current: false };
     const cleanedCodes = [];
@@ -1062,6 +1263,42 @@ export default function App() {
     showToast("تم حذف بند المستخلص", "danger");
   };
 
+  /* ============ خصومات المستخلص (مرتبات/سلف/سولار تدفعه الشركة وتخصمه) ============ */
+  const addClaimDeduction = (d) => {
+    if (!d.owner || !d.claimMonth || !(Number(d.amount) > 0)) { showToast("الشركة والشهر والمبلغ مطلوبين", "danger"); return; }
+    pushUndo("claimDeductions", claimDeductions);
+    saveClaimDeductions([...claimDeductions, { ...d, amount: Number(d.amount) || 0, id: uid() }]);
+    logAudit("إضافة", "خصم مستخلص", `${d.owner} — ${d.type || ""} — ${fmtMoney(d.amount)}`);
+    showToast("تم حفظ الخصم");
+  };
+  const updateClaimDeduction = (id, updates) => {
+    pushUndo("claimDeductions", claimDeductions);
+    saveClaimDeductions(claimDeductions.map((d) => (d.id === id ? { ...d, ...updates, amount: Number(updates.amount) || 0 } : d)));
+    logAudit("تعديل", "خصم مستخلص", id);
+    showToast("تم تعديل الخصم");
+  };
+  const deleteClaimDeduction = (id) => {
+    pushUndo("claimDeductions", claimDeductions);
+    saveClaimDeductions(claimDeductions.filter((d) => d.id !== id));
+    logAudit("حذف", "خصم مستخلص", id);
+    showToast("تم حذف الخصم", "danger");
+  };
+
+  /* ============ شحن محفظة أوكتين (سولار وكارتات) ============ */
+  const addOctaneTopUp = (t) => {
+    if (!t.owner || !t.date || !(Number(t.amount) > 0)) { showToast("الشركة والتاريخ والمبلغ مطلوبين", "danger"); return; }
+    pushUndo("octaneTopUps", octaneTopUps);
+    saveOctaneTopUps([...octaneTopUps, { ...t, amount: Number(t.amount) || 0, id: uid() }]);
+    logAudit("إضافة", "شحن أوكتين", `${t.owner} — ${fmtMoney(t.amount)}`);
+    showToast("تم تسجيل الشحن");
+  };
+  const deleteOctaneTopUp = (id) => {
+    pushUndo("octaneTopUps", octaneTopUps);
+    saveOctaneTopUps(octaneTopUps.filter((t) => t.id !== id));
+    logAudit("حذف", "شحن أوكتين", id);
+    showToast("تم حذف الشحن", "danger");
+  };
+
   const subCustodyTotals = useMemo(() => {
     const map = {};
     for (const c of subCustodies) {
@@ -1087,7 +1324,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !revenuesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded;
 
   const NAV_GROUPS = [
     {
@@ -1104,7 +1341,10 @@ export default function App() {
         { key: "subCustodies", label: "عهد فرعية (مشرفين)", icon: Wallet },
         { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
         { key: "database", label: "قاعدة البيانات", icon: Database },
-        { key: "revenue", label: "الإيرادات", icon: Wallet },
+        { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
+        { key: "claimDeductions", label: "خصومات المستخلص", icon: Wallet },
+        { key: "departmentBank", label: "بنك القسم", icon: Building2 },
+        { key: "octaneWallet", label: "محفظة أوكتين (سولار)", icon: Fuel },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
@@ -1376,9 +1616,12 @@ export default function App() {
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
-            {view === "revenue" && <RevenueView revenues={revenues} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addRevenue} onUpdate={updateRevenue} onDelete={deleteRevenue} />}
+            {view === "claims" && <ClaimsView claims={claims} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addClaim} onUpdate={updateClaim} onDelete={deleteClaim} />}
+            {view === "claimDeductions" && <ClaimDeductionsView claims={claims} claimDeductions={claimDeductions} onAdd={addClaimDeduction} onUpdate={updateClaimDeduction} onDelete={deleteClaimDeduction} />}
+            {view === "departmentBank" && <DepartmentBankView claims={claims} claimDeductions={claimDeductions} custodies={custodies} octaneTopUps={octaneTopUps} />}
+            {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
-            {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} revenues={revenues} />}
+            {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
             {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
@@ -1454,7 +1697,10 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "revenueAnalysis", label: "تحليل الإيرادات", desc: "أداء الإيراد لكل معدة وجهة مستأجرة", icon: TrendingUp, color: COLORS.gold },
     { key: "accounting", label: "المحاسبة", desc: "دليل حسابات، قيود مزدوجة تلقائية، دفتر أستاذ، وميزان مراجعة", icon: BookOpen, color: "#2E5A8C" },
     { key: "entry", label: "إدخال بند صرف", desc: "سجّل معاملة مصروف جديدة", icon: FilePlus2, color: "#5B7A9E" },
-    { key: "revenue", label: "الإيرادات", desc: "سجّل إيراد تأجير معدة شهري", icon: Wallet, color: "#8B9C6E" },
+    { key: "claims", label: "المستخلصات", desc: "مستخلص شهري لكل شركة على المعدات اللي اشتغلت عندها", icon: FileSpreadsheet, color: "#8B9C6E" },
+    { key: "claimDeductions", label: "خصومات المستخلص", desc: "مرتبات وسلف وسولار خصمته الشركة من المستخلص", icon: Wallet, color: "#B08D42" },
+    { key: "departmentBank", label: "بنك القسم", desc: "رصيد كل شركة لوحدها — صافي المستخلصات الداخلة والعهد الخارجة", icon: Building2, color: "#1C2C4A" },
+    { key: "octaneWallet", label: "محفظة أوكتين", desc: "شحن ومتابعة رصيد محفظة السولار والكارتات", icon: Fuel, color: "#00838F" },
     { key: "custodies", label: "العهد", desc: "إدارة عهد الصرف لكل جهة", icon: ClipboardList, color: "#647085" },
     { key: "database", label: "قاعدة البيانات", desc: "كل بنود الصرف قابلة للبحث والفلترة", icon: Database, color: "#1C2C4A" },
     { key: "equipment", label: "بطاقة أداء المعدات", desc: "تكلفة وربحية كل معدة وسيارة", icon: Wrench, color: "#6A4A2E" },
@@ -5802,6 +6048,9 @@ function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelet
             const activeMonth = monthFilter[owner] || "الكل";
             const list = ownerAll.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.claimMonth || "").localeCompare(a.claimMonth || ""));
             const total = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+            const codeOwner = (code) => equipmentCodes.find((ec) => normCode(ec.code) === normCode(code))?.owner;
+            const ownTotal = list.filter((c) => (codeOwner(c.equipmentCode) || owner) === owner).reduce((s, c) => s + (Number(c.total) || 0), 0);
+            const crossTotal = total - ownTotal;
             return (
               <SectionCard
                 key={owner}
@@ -5815,6 +6064,12 @@ function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelet
               >
                 {activeMonth !== "الكل" && (
                   <div className="text-xs font-bold mb-3" style={{ color: COLORS.gold }}>الفترة: {claimPeriodLabel(activeMonth)}</div>
+                )}
+                {crossTotal > 0 && (
+                  <div className="no-print flex flex-wrap gap-3 mb-3 text-xs font-bold">
+                    <span className="px-2.5 py-1 rounded-md" style={{ background: "#EAF3EC", color: "#1B5E20" }}>معدات {owner} شغالة لنفسها: {fmtMoney(ownTotal)}</span>
+                    <span className="px-2.5 py-1 rounded-md" style={{ background: "#FDF3E3", color: "#8A5A00" }}>معدات الطرف التاني شغالة عندها: {fmtMoney(crossTotal)}</span>
+                  </div>
                 )}
                 <div className="no-print flex flex-wrap items-center gap-2 mb-4">
                   <span className="text-xs font-bold" style={{ color: COLORS.slate }}>الشهر:</span>
@@ -5837,23 +6092,30 @@ function ClaimsView({ claims, equipmentCodes, expenses, onAdd, onUpdate, onDelet
                         </tr>
                       </thead>
                       <tbody>
-                        {list.map((c) => (
-                          <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                            <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
-                            <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
-                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
-                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
-                            <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
-                            <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
-                            <td className="px-3 py-2.5">{c.notes || "—"}</td>
-                            <td className="px-3 py-2.5 no-print">
-                              <div className="flex items-center gap-1">
-                                <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                                <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        {list.map((c) => {
+                          const eqOwner = codeOwner(c.equipmentCode);
+                          const isCross = eqOwner && eqOwner !== owner;
+                          return (
+                            <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                              <td className="px-3 py-2.5 font-semibold whitespace-nowrap">
+                                {c.equipmentCode}
+                                {isCross && <span className="mr-1 text-[10px] font-bold" style={{ color: "#8A5A00" }}> (ملك {eqOwner}) 🔄</span>}
+                              </td>
+                              <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
+                              <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
+                              <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
+                              <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
+                              <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
+                              <td className="px-3 py-2.5">{c.notes || "—"}</td>
+                              <td className="px-3 py-2.5 no-print">
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                                  <button onClick={() => onDelete(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -6494,13 +6756,25 @@ function PrintView({ custodies, custodyTotals, expenses, userEmail }) {
 /* ============================================================
    المحاسبة — الشاشة
 ============================================================ */
-function AccountingView({ custodies, expenses, revenues }) {
-  const [tab, setTab] = useState("journal"); // journal | accounts | ledger | trial | income
-  const [ledgerAccount, setLedgerAccount] = useState("1100");
+function AccountingView({
+  custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes,
+  accounts, manualJournalEntries, fiscalClosings,
+  onAddAccount, onUpdateAccount, onDeleteAccount, onAddManualEntry, onDeleteManualEntry, onCloseFiscalPeriod,
+}) {
+  const [tab, setTab] = useState("journal");
+  const [ledgerAccount, setLedgerAccount] = useState(accounts[0]?.code || "1100");
 
-  const entries = useMemo(() => buildJournalEntries({ custodies, expenses, revenues }), [custodies, expenses, revenues]);
-  const trialBalance = useMemo(() => buildTrialBalance(entries), [entries]);
-  const income = useMemo(() => buildIncomeStatement(entries), [entries]);
+  const closingToEntryLocal = (c) => ({ id: `closing-${c.id}`, date: c.date, desc: `قيد قفل فترة — ${c.label}`, equipmentCode: "", isClosing: true, lines: c.lines });
+
+  const autoEntries = useMemo(() => buildJournalEntries({ custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts }),
+    [custodies, expenses, claims, claimDeductions, octaneTopUps, fuelRecords, equipmentCodes, accounts]);
+  const entries = useMemo(() => [...autoEntries, ...manualJournalEntries, ...fiscalClosings.map(closingToEntryLocal)].sort((a, b) => (a.date || "").localeCompare(b.date || "")),
+    [autoEntries, manualJournalEntries, fiscalClosings]);
+
+  const accountByCode = useMemo(() => Object.fromEntries(accounts.map((a) => [a.code, a])), [accounts]);
+  const trialBalance = useMemo(() => buildTrialBalance(entries, accounts), [entries, accounts]);
+  const income = useMemo(() => buildIncomeStatement(entries, accounts), [entries, accounts]);
+  const balanceSheet = useMemo(() => buildBalanceSheet(entries, accounts), [entries, accounts]);
   const ledgerRows = useMemo(() => buildLedgerForAccount(entries, ledgerAccount), [entries, ledgerAccount]);
 
   const totalDebit = trialBalance.reduce((s, a) => s + a.debit, 0);
@@ -6509,15 +6783,18 @@ function AccountingView({ custodies, expenses, revenues }) {
 
   const TABS = [
     { key: "journal", label: "القيود اليومية", icon: FilePlus2 },
+    { key: "manual", label: "قيود يدوية", icon: Pencil },
     { key: "accounts", label: "دليل الحسابات", icon: ListChecks },
     { key: "ledger", label: "دفتر الأستاذ", icon: BookOpen },
     { key: "trial", label: "ميزان المراجعة", icon: Scale },
+    { key: "balanceSheet", label: "الميزانية العمومية", icon: Building2 },
     { key: "income", label: "قائمة الدخل وربحية المعدات", icon: TrendingUp },
+    { key: "closing", label: "قفل السنة المالية", icon: ShieldCheck },
   ];
 
   return (
     <div className="space-y-6">
-      <Header title="المحاسبة" sub="قيود مزدوجة (مدين/دائن) بتتولّد تلقائيًا من العهد والمصروفات والإيرادات — من غير أي إدخال يدوي" />
+      <Header title="المحاسبة" sub="قيود مزدوجة (مدين/دائن) بتتولّد تلقائيًا من المستخلصات والعهد والمصروفات ومحفظة أوكتين" />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -6555,34 +6832,17 @@ function AccountingView({ custodies, expenses, revenues }) {
       </div>
 
       {tab === "accounts" && (
-        <SectionCard title={`دليل الحسابات (${CHART_OF_ACCOUNTS.length})`}>
-          <div className="overflow-x-auto -mx-5">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                  {["كود الحساب", "اسم الحساب", "النوع"].map((h) => (
-                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {CHART_OF_ACCOUNTS.map((a) => (
-                  <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
-                    <td className="px-3 py-2.5 font-bold tabular-nums">{a.code}</td>
-                    <td className="px-3 py-2.5">{a.name}</td>
-                    <td className="px-3 py-2.5">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
+        <AccountingAccountsTab accounts={accounts} onAdd={onAddAccount} onUpdate={onUpdateAccount} onDelete={onDeleteAccount} />
+      )}
+
+      {tab === "manual" && (
+        <AccountingManualEntriesTab accounts={accounts} manualJournalEntries={manualJournalEntries} onAdd={onAddManualEntry} onDelete={onDeleteManualEntry} />
       )}
 
       {tab === "journal" && (
         <SectionCard title={`القيود اليومية (${entries.length})`}>
           {entries.length === 0 ? (
-            <EmptyState icon={FilePlus2} title="لا توجد قيود بعد" sub="القيود بتتولّد تلقائيًا أول ما تسجّل عهدة أو مصروف أو إيراد" />
+            <EmptyState icon={FilePlus2} title="لا توجد قيود بعد" sub="القيود بتتولّد تلقائيًا أول ما تسجّل مستخلص أو عهدة أو مصروف" />
           ) : (
             <div className="overflow-x-auto -mx-5">
               <table className="w-full text-sm">
@@ -6600,10 +6860,10 @@ function AccountingView({ custodies, expenses, revenues }) {
                     return (
                       <tr key={en.id} className="border-t" style={{ borderColor: COLORS.border }}>
                         <td className="px-3 py-2.5 whitespace-nowrap">{en.date || "—"}</td>
-                        <td className="px-3 py-2.5">{en.desc}</td>
+                        <td className="px-3 py-2.5">{en.desc}{en.isManual && <span className="mr-1 text-[10px] font-bold" style={{ color: COLORS.gold }}> (يدوي)</span>}{en.isClosing && <span className="mr-1 text-[10px] font-bold" style={{ color: COLORS.danger }}> (قفل فترة)</span>}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">{en.equipmentCode || "—"}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{debitLine ? `${debitLine.account} - ${ACCOUNT_BY_CODE[debitLine.account]?.name}` : "—"}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{creditLine ? `${creditLine.account} - ${ACCOUNT_BY_CODE[creditLine.account]?.name}` : "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{debitLine ? `${debitLine.account} - ${accountByCode[debitLine.account]?.name || "؟"}` : "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{creditLine ? `${creditLine.account} - ${accountByCode[creditLine.account]?.name || "؟"}` : "—"}</td>
                         <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{fmtMoney(debitLine?.debit || creditLine?.credit)}</td>
                       </tr>
                     );
@@ -6620,7 +6880,7 @@ function AccountingView({ custodies, expenses, revenues }) {
           title="دفتر الأستاذ"
           action={
             <Select value={ledgerAccount} onChange={(e) => setLedgerAccount(e.target.value)} className="w-64">
-              {CHART_OF_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+              {accounts.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
             </Select>
           }
         >
@@ -6687,6 +6947,48 @@ function AccountingView({ custodies, expenses, revenues }) {
         </SectionCard>
       )}
 
+      {tab === "balanceSheet" && (
+        <SectionCard title="الميزانية العمومية">
+          {!balanceSheet.isBalanced && (
+            <div className="p-3 mb-4 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: "#FDECEA", color: COLORS.danger }}>
+              <AlertTriangle size={16} /> الأصول مش متساوية مع (الخصوم + حقوق الملكية)
+            </div>
+          )}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <div className="font-extrabold mb-2" style={{ color: COLORS.ink }}>الأصول</div>
+              {balanceSheet.assets.map((a) => (
+                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
+                  <span style={{ color: COLORS.slate }}>{a.name}</span>
+                  <span className="tabular-nums font-bold">{fmtMoney(a.balance)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between py-2 font-extrabold mt-2 border-t-2" style={{ borderColor: COLORS.ink }}>
+                <span>إجمالي الأصول</span><span className="tabular-nums">{fmtMoney(balanceSheet.totalAssets)}</span>
+              </div>
+            </div>
+            <div>
+              <div className="font-extrabold mb-2" style={{ color: COLORS.ink }}>الخصوم وحقوق الملكية</div>
+              {balanceSheet.liabilities.map((a) => (
+                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
+                  <span style={{ color: COLORS.slate }}>{a.name}</span>
+                  <span className="tabular-nums font-bold">{fmtMoney(-a.balance)}</span>
+                </div>
+              ))}
+              {balanceSheet.equity.map((a) => (
+                <div key={a.code} className="flex justify-between py-1.5 border-b text-sm" style={{ borderColor: COLORS.border }}>
+                  <span style={{ color: COLORS.slate }}>{a.name}</span>
+                  <span className="tabular-nums font-bold">{fmtMoney(-a.balance)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between py-2 font-extrabold mt-2 border-t-2" style={{ borderColor: COLORS.ink }}>
+                <span>الإجمالي</span><span className="tabular-nums">{fmtMoney(balanceSheet.totalLiabilities + balanceSheet.totalEquity)}</span>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
       {tab === "income" && (
         <div className="space-y-6">
           <SectionCard title="قائمة الدخل الإجمالية">
@@ -6733,6 +7035,413 @@ function AccountingView({ custodies, expenses, revenues }) {
           </SectionCard>
         </div>
       )}
+
+      {tab === "closing" && (
+        <AccountingClosingTab fiscalClosings={fiscalClosings} onClose={onCloseFiscalPeriod} />
+      )}
+    </div>
+  );
+}
+
+function AccountingAccountsTab({ accounts, onAdd, onUpdate, onDelete }) {
+  const [form, setForm] = useState({ code: "", name: "", type: "expense" });
+  const [editingCode, setEditingCode] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", type: "" });
+
+  const submit = (e) => {
+    e.preventDefault();
+    onAdd(form);
+    setForm({ code: "", name: "", type: "expense" });
+  };
+  const startEdit = (a) => { setEditingCode(a.code); setEditForm({ name: a.name, type: a.type }); };
+  const saveEdit = (code) => { onUpdate(code, editForm); setEditingCode(null); };
+
+  return (
+    <div className="space-y-4">
+      <SectionCard title="إضافة حساب جديد">
+        <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <Field label="كود الحساب" required><TextInput value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} required placeholder="مثال: 5960" /></Field>
+          <div className="md:col-span-2"><Field label="اسم الحساب" required><TextInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required /></Field></div>
+          <Field label="النوع"><Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>{Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></Field>
+          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.navy }}><Plus size={14} className="inline -mt-0.5" /> إضافة الحساب</button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title={`دليل الحسابات (${accounts.length})`}>
+        <div className="overflow-x-auto -mx-5">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                {["كود الحساب", "اسم الحساب", "النوع", ""].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((a) => (
+                <tr key={a.code} className="border-t" style={{ borderColor: COLORS.border }}>
+                  <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{a.code}</td>
+                  {editingCode === a.code ? (
+                    <>
+                      <td className="px-3 py-2.5"><TextInput value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} /></td>
+                      <td className="px-3 py-2.5"><Select value={editForm.type} onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value }))}>{Object.entries(ACCOUNT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></td>
+                      <td className="px-3 py-2.5 flex gap-1.5">
+                        <button onClick={() => saveEdit(a.code)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: "#1B5E20" }}><CheckCircle2 size={16} /></button>
+                        <button onClick={() => setEditingCode(null)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><X size={16} /></button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2.5">{a.name}</td>
+                      <td className="px-3 py-2.5">{ACCOUNT_TYPE_LABELS[a.type]}</td>
+                      <td className="px-3 py-2.5 flex gap-1.5">
+                        <button onClick={() => startEdit(a)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                        <button onClick={() => onDelete(a.code)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+function AccountingManualEntriesTab({ accounts, manualJournalEntries, onAdd, onDelete }) {
+  const emptyLine = () => ({ account: accounts[0]?.code || "", debit: "", credit: "" });
+  const [form, setForm] = useState({ date: todayISO(), desc: "", equipmentCode: "", lines: [emptyLine(), emptyLine()] });
+
+  const setLine = (i, field, val) => setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? { ...l, [field]: val } : l)) }));
+  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }));
+  const removeLine = (i) => setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+
+  const totalDebit = form.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+  const totalCredit = form.lines.reduce((s, l) => s + (Number(l.credit) || 0), 0);
+
+  const submit = (e) => {
+    e.preventDefault();
+    const lines = form.lines.filter((l) => (Number(l.debit) || 0) > 0 || (Number(l.credit) || 0) > 0)
+      .map((l) => ({ account: l.account, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 }));
+    onAdd({ ...form, lines });
+    setForm({ date: todayISO(), desc: "", equipmentCode: "", lines: [emptyLine(), emptyLine()] });
+  };
+
+  return (
+    <div className="space-y-4">
+      <SectionCard title="قيد يدوي جديد">
+        <form onSubmit={submit} className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+            <div className="md:col-span-2"><Field label="البيان" required><TextInput value={form.desc} onChange={(e) => setForm((f) => ({ ...f, desc: e.target.value }))} required /></Field></div>
+          </div>
+          <Field label="كود المعدة (اختياري)"><TextInput value={form.equipmentCode} onChange={(e) => setForm((f) => ({ ...f, equipmentCode: e.target.value }))} /></Field>
+
+          <div className="space-y-2">
+            {form.lines.map((l, i) => (
+              <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-6"><Select value={l.account} onChange={(e) => setLine(i, "account", e.target.value)}>{accounts.map((a) => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}</Select></div>
+                <div className="col-span-2"><TextInput type="number" step="0.01" placeholder="مدين" value={l.debit} onChange={(e) => setLine(i, "debit", e.target.value)} /></div>
+                <div className="col-span-2"><TextInput type="number" step="0.01" placeholder="دائن" value={l.credit} onChange={(e) => setLine(i, "credit", e.target.value)} /></div>
+                <button type="button" onClick={() => removeLine(i)} className="col-span-2 p-2 rounded-md hover:bg-red-50 text-center" style={{ color: COLORS.danger }}><Trash2 size={14} className="inline" /></button>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={addLine} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> إضافة سطر</button>
+
+          <div className="text-xs font-bold" style={{ color: Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0 ? "#1B5E20" : COLORS.danger }}>
+            إجمالي المدين {fmtMoney(totalDebit)} — إجمالي الدائن {fmtMoney(totalCredit)}
+          </div>
+
+          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ القيد</button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title={`القيود اليدوية (${manualJournalEntries.length})`}>
+        {manualJournalEntries.length === 0 ? (
+          <EmptyState icon={Pencil} title="لا توجد قيود يدوية بعد" />
+        ) : (
+          <div className="space-y-2">
+            {manualJournalEntries.map((en) => (
+              <div key={en.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
+                <div>
+                  <div className="font-bold">{en.desc} <span className="text-xs font-normal" style={{ color: COLORS.slate }}>({en.date})</span></div>
+                  <div className="text-xs mt-1" style={{ color: COLORS.slate }}>{en.lines.map((l) => `${l.account} ${l.debit > 0 ? "مدين " + fmtMoney(l.debit) : "دائن " + fmtMoney(l.credit)}`).join(" | ")}</div>
+                </div>
+                <button onClick={() => onDelete(en.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+function AccountingClosingTab({ fiscalClosings, onClose }) {
+  const [form, setForm] = useState({ date: todayISO(), label: "" });
+  const submit = (e) => { e.preventDefault(); onClose(form.date, form.label); setForm({ date: todayISO(), label: "" }); };
+
+  return (
+    <div className="space-y-4">
+      <SectionCard title="قفل فترة/سنة مالية">
+        <p className="text-xs mb-3" style={{ color: COLORS.slate }}>
+          بيتحسب صافي الإيراد والمصروفات من آخر قفل لحد التاريخ ده، وبيتقفل بقيد بيصفّر حسابات الإيراد والمصروفات ويرحّل الصافي لحساب "صافي نتيجة القسم" — عشان الفترة الجاية تبدأ من الصفر.
+        </p>
+        <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <Field label="تاريخ القفل" required><TextInput type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+          <div className="md:col-span-2"><Field label="وصف الفترة"><TextInput value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} placeholder="مثال: السنة المالية 2026" /></Field></div>
+          <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.danger }}>قفل الفترة</button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title={`سجل القفلات السابقة (${fiscalClosings.length})`}>
+        {fiscalClosings.length === 0 ? (
+          <EmptyState icon={ShieldCheck} title="لا توجد فترات مقفولة بعد" />
+        ) : (
+          <div className="space-y-2">
+            {fiscalClosings.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((c) => (
+              <div key={c.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
+                <div>
+                  <div className="font-bold">{c.label} <span className="text-xs font-normal" style={{ color: COLORS.slate }}>({c.date})</span></div>
+                  <div className="text-xs mt-1" style={{ color: COLORS.slate }}>إيراد {fmtMoney(c.revenueTotal)} — مصروفات {fmtMoney(c.expenseTotal)}</div>
+                </div>
+                <div className="font-extrabold tabular-nums" style={{ color: c.netAmount >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(c.netAmount)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
+function ClaimDeductionsView({ claims, claimDeductions, onAdd, onUpdate, onDelete }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const empty = { owner: SOURCES[0], claimMonth: todayISO().slice(0, 7), type: "راتب", description: "", amount: "" };
+  const [form, setForm] = useState(empty);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const startAdd = (owner) => { setEditingId(null); setForm({ ...empty, owner: owner || SOURCES[0] }); setShowForm(true); };
+  const startEdit = (d) => { setEditingId(d.id); setForm({ owner: d.owner, claimMonth: d.claimMonth, type: d.type, description: d.description || "", amount: d.amount }); setShowForm(true); };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+  const submit = (e) => { e.preventDefault(); if (editingId) onUpdate(editingId, form); else onAdd(form); cancel(); };
+
+  const DEDUCTION_TYPES = ["راتب", "سلفة", "سولار", "أخرى"];
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="خصومات المستخلص"
+        sub="مرتبات وسلف وسولار خصمته الشركة من قيمة المستخلص — الصافي بعد الخصم هو اللي بيوصل بنك القسم"
+        action={
+          <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "خصم جديد"}
+          </button>
+        }
+      />
+
+      {showForm && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-lg rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل خصم" : "خصم جديد"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="الشهر" required><TextInput type="month" value={form.claimMonth} onChange={set("claimMonth")} required /></Field>
+              <Field label="الجهة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+              <Field label="نوع الخصم" required><Select value={form.type} onChange={set("type")}>{DEDUCTION_TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
+              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+              <div className="md:col-span-2"><Field label="الوصف"><TextInput value={form.description} onChange={set("description")} placeholder="مثال: مرتب السائق فلان" /></Field></div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6 pt-2">
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ الخصم"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {SOURCES.map((owner) => {
+        const ownerClaims = claims.filter((c) => (c.owner || SOURCES[0]) === owner);
+        const months = [...new Set([...ownerClaims.map((c) => c.claimMonth), ...claimDeductions.filter((d) => d.owner === owner).map((d) => d.claimMonth)])].filter(Boolean).sort().reverse();
+        return (
+          <SectionCard key={owner} title={owner}>
+            {months.length === 0 ? (
+              <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد مستخلصات بعد</div>
+            ) : (
+              <div className="space-y-4">
+                {months.map((m) => {
+                  const gross = ownerClaims.filter((c) => c.claimMonth === m).reduce((s, c) => s + (Number(c.total) || 0), 0);
+                  const deds = claimDeductions.filter((d) => d.owner === owner && d.claimMonth === m);
+                  const dedTotal = deds.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+                  const net = gross - dedTotal;
+                  return (
+                    <div key={m} className="p-3 rounded-lg border" style={{ borderColor: COLORS.border }}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="font-bold text-sm">{m}</div>
+                        <div className="flex gap-3 text-xs font-bold">
+                          <span style={{ color: COLORS.slate }}>إجمالي: {fmtMoney(gross)}</span>
+                          <span style={{ color: COLORS.danger }}>خصومات: {fmtMoney(dedTotal)}</span>
+                          <span style={{ color: "#1B5E20" }}>الصافي: {fmtMoney(net)}</span>
+                        </div>
+                        <button onClick={() => { setEditingId(null); setForm({ ...empty, owner, claimMonth: m }); setShowForm(true); }} className="px-2.5 py-1 rounded-md text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                          <Plus size={12} className="inline -mt-0.5" /> إضافة خصم
+                        </button>
+                      </div>
+                      {deds.length > 0 && (
+                        <div className="space-y-1.5">
+                          {deds.map((d) => (
+                            <div key={d.id} className="flex items-center justify-between text-xs py-1">
+                              <span>{d.type} — {d.description || "—"}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold tabular-nums">{fmtMoney(d.amount)}</span>
+                                <button onClick={() => startEdit(d)} className="p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={12} /></button>
+                                <button onClick={() => onDelete(d.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+        );
+      })}
+    </div>
+  );
+}
+
+function DepartmentBankView({ claims, claimDeductions, custodies, octaneTopUps }) {
+  const bank = useMemo(() => buildDepartmentBank({ claims, claimDeductions, custodies, octaneTopUps }), [claims, claimDeductions, custodies, octaneTopUps]);
+
+  return (
+    <div className="space-y-6">
+      <Header title="بنك القسم" sub="صافي المستخلصات الداخلة لكل شركة، والعهد وشحن أوكتين الخارجة منها" />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {SOURCES.map((owner) => (
+          <div key={owner} className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+            <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>{owner}</div>
+            <div className="text-lg font-extrabold tabular-nums" style={{ color: (bank.byOwner[owner]?.balance || 0) >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(bank.byOwner[owner]?.balance || 0)}</div>
+            <div className="text-[11px] mt-1" style={{ color: COLORS.slate }}>داخل {fmtMoney(bank.byOwner[owner]?.totalIn || 0)} — خارج {fmtMoney(bank.byOwner[owner]?.totalOut || 0)}</div>
+          </div>
+        ))}
+        <div className="p-4 rounded-xl" style={{ background: COLORS.navy }}>
+          <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.7)" }}>الرصيد الإجمالي</div>
+          <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(bank.overall)}</div>
+        </div>
+      </div>
+
+      {SOURCES.map((owner) => (
+        <SectionCard key={owner} title={`حركات ${owner}`}>
+          {(bank.byOwner[owner]?.transactions || []).length === 0 ? (
+            <EmptyState icon={Building2} title="لا توجد حركات بعد" />
+          ) : (
+            <div className="overflow-x-auto -mx-5">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                    {["التاريخ", "البيان", "داخل", "خارج", "الرصيد"].map((h) => (
+                      <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {bank.byOwner[owner].transactions.map((t, i) => (
+                    <tr key={i} className="border-t" style={{ borderColor: COLORS.border }}>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{t.date || "—"}</td>
+                      <td className="px-3 py-2.5">{t.desc}</td>
+                      <td className="px-3 py-2.5 tabular-nums" style={{ color: "#1B5E20" }}>{t.in ? fmtMoney(t.in) : ""}</td>
+                      <td className="px-3 py-2.5 tabular-nums" style={{ color: COLORS.danger }}>{t.out ? fmtMoney(t.out) : ""}</td>
+                      <td className="px-3 py-2.5 font-bold tabular-nums">{fmtMoney(t.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SectionCard>
+      ))}
+    </div>
+  );
+}
+
+function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, onDelete }) {
+  const [showForm, setShowForm] = useState(false);
+  const empty = { owner: SOURCES[0], date: todayISO(), amount: "", notes: "" };
+  const [form, setForm] = useState(empty);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const wallet = useMemo(() => buildOctaneWallet({ octaneTopUps, fuelRecords, equipmentCodes }), [octaneTopUps, fuelRecords, equipmentCodes]);
+
+  const submit = (e) => { e.preventDefault(); onAdd(form); setForm(empty); setShowForm(false); };
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="محفظة أوكتين (سولار وكارتات)"
+        sub="شحن المحفظة عن طريق طلب صرف من بنك القسم، والاستهلاك بيتحسب تلقائي من سجل السولار"
+        action={
+          <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+            {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "شحن جديد"}
+          </button>
+        }
+      />
+
+      {showForm && (
+        <SectionCard title="تسجيل شحن جديد">
+          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+            <Field label="الجهة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+            <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
+            <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
+            <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
+            <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ الشحن</button>
+          </form>
+        </SectionCard>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {wallet.rows.map((r) => (
+          <div key={r.owner} className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+            <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>{r.owner}</div>
+            <div className="text-lg font-extrabold tabular-nums" style={{ color: r.remaining >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.remaining)}</div>
+            <div className="text-[11px] mt-1" style={{ color: COLORS.slate }}>مشحون {fmtMoney(r.charged)} — مستهلك {fmtMoney(r.spent)}</div>
+          </div>
+        ))}
+        <div className="p-4 rounded-xl" style={{ background: COLORS.navy }}>
+          <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.7)" }}>الإجمالي المتبقي</div>
+          <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(wallet.totalRemaining)}</div>
+        </div>
+      </div>
+
+      <SectionCard title={`سجل الشحن (${octaneTopUps.length})`}>
+        {octaneTopUps.length === 0 ? (
+          <EmptyState icon={Fuel} title="لا توجد عمليات شحن بعد" />
+        ) : (
+          <div className="space-y-2">
+            {octaneTopUps.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((t) => (
+              <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
+                <div>
+                  <div className="font-bold">{t.owner} <span className="text-xs font-normal" style={{ color: COLORS.slate }}>({t.date})</span></div>
+                  {t.notes && <div className="text-xs mt-0.5" style={{ color: COLORS.slate }}>{t.notes}</div>}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="font-extrabold tabular-nums">{fmtMoney(t.amount)}</div>
+                  <button onClick={() => onDelete(t.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
