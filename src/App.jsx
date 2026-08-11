@@ -9,7 +9,7 @@ import {
   Search, Trash2, X, Plus, ChevronLeft, TrendingUp, TrendingDown,
   Building2, Fuel, ClipboardList, CheckCircle2, UploadCloud, FileSpreadsheet,
   MapPin, BarChart3, Filter, ShieldCheck, Loader2, Printer, ArrowLeft, Sparkles, Pencil, ListChecks, Menu, Sun, Moon,
-  BookOpen, Scale,
+  BookOpen, Scale, HardHat,
 } from "lucide-react";
 import { db, auth } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
@@ -758,6 +758,11 @@ export default function App() {
   const [vehicleMissions, saveVehicleMissions, vehicleMissionsLoaded] = useStorage("vehicleMissions", []);
   const [octaneTopUps, saveOctaneTopUps, octaneTopUpsLoaded] = useStorage("octaneTopUps", []);
   const [bankTransactions, saveBankTransactions, bankTransactionsLoaded] = useStorage("bankTransactions", []);
+  const [disbursementRequests, saveDisbursementRequests, disbursementRequestsLoaded] = useStorage("disbursementRequests", []);
+  const [contractors, saveContractors, contractorsLoaded] = useStorage("contractors", []);
+  const [contractingClientEntries, saveContractingClientEntries, contractingClientEntriesLoaded] = useStorage("contractingClientEntries", []);
+  const [contractingContractorEntries, saveContractingContractorEntries, contractingContractorEntriesLoaded] = useStorage("contractingContractorEntries", []);
+  const [contractingBank, saveContractingBank, contractingBankLoaded] = useStorage("contractingBank", []);
   // "الإيرادات" اتلغت كإدخال يدوي — بقى إيراد كل معدة بيتحسب مباشرة من المستخلصات (claims) عشان يفضل مصدر واحد للحقيقة
   const revenues = useMemo(() => claims.map((c) => ({
     id: c.id, equipmentCode: c.equipmentCode, owner: c.owner, source: c.owner, renter: c.owner,
@@ -816,7 +821,9 @@ export default function App() {
     fuelRecords: saveFuelRecords, oilRecords: saveOilRecords, equipmentCodes: saveEquipmentCodes, salaries: saveSalaries,
     accounts: saveAccounts, manualJournalEntries: saveManualJournalEntries, fiscalClosings: saveFiscalClosings,
     claimDeductions: saveClaimDeductions, octaneTopUps: saveOctaneTopUps, claims: saveClaims, bankTransactions: saveBankTransactions,
-    vehicleMissions: saveVehicleMissions,
+    vehicleMissions: saveVehicleMissions, disbursementRequests: saveDisbursementRequests,
+    contractors: saveContractors, contractingClientEntries: saveContractingClientEntries,
+    contractingContractorEntries: saveContractingContractorEntries, contractingBank: saveContractingBank,
   };
   const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
   const pushUndoMulti = (entries) => setLastAction(entries);
@@ -1274,6 +1281,98 @@ export default function App() {
     showToast("تم حذف المأمورية", "danger");
   };
 
+  /* ============ طلبات الصرف ============ */
+  const addDisbursementRequest = (r) => {
+    if (!r.beneficiary || !(Number(r.totalAmount) > 0)) { showToast("المستفيد والمبلغ مطلوبين", "danger"); return; }
+    pushUndo("disbursementRequests", disbursementRequests);
+    const nextCode = (disbursementRequests.reduce((mx, x) => Math.max(mx, Number(x.code) || 0), 0) || 0) + 1;
+    const record = { ...r, code: r.code || nextCode, status: "pending", id: uid() };
+    saveDisbursementRequests([...disbursementRequests, record]);
+    logAudit("إضافة", "طلب صرف", `${r.beneficiary} — ${fmtMoney(r.totalAmount)}`);
+    showToast("تم حفظ طلب الصرف");
+  };
+  const updateDisbursementRequest = (id, updates) => {
+    pushUndo("disbursementRequests", disbursementRequests);
+    saveDisbursementRequests(disbursementRequests.map((r) => (r.id === id ? { ...r, ...updates } : r)));
+    logAudit("تعديل", "طلب صرف", id);
+    showToast("تم تعديل طلب الصرف");
+  };
+  const deleteDisbursementRequest = (id) => {
+    pushUndo("disbursementRequests", disbursementRequests);
+    saveDisbursementRequests(disbursementRequests.filter((r) => r.id !== id));
+    logAudit("حذف", "طلب صرف", id);
+    showToast("تم حذف طلب الصرف", "danger");
+  };
+  const markDisbursementExecuted = (id) => {
+    pushUndo("disbursementRequests", disbursementRequests);
+    saveDisbursementRequests(disbursementRequests.map((r) => (r.id === id ? { ...r, status: r.status === "executed" ? "pending" : "executed", executedDate: r.status === "executed" ? "" : todayISO() } : r)));
+    logAudit("تحديث حالة", "طلب صرف", id);
+    showToast("تم تحديث حالة الطلب");
+  };
+
+  /* ============ قسم المقاولات ============ */
+  const addContractor = (c) => {
+    if (!c.name) { showToast("اسم المقاول مطلوب", "danger"); return; }
+    pushUndo("contractors", contractors);
+    saveContractors([...contractors, { ...c, id: uid() }]);
+    logAudit("إضافة", "مقاول", c.name);
+    showToast("تم إضافة المقاول");
+  };
+  const updateContractor = (id, updates) => {
+    pushUndo("contractors", contractors);
+    saveContractors(contractors.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    logAudit("تعديل", "مقاول", id);
+    showToast("تم تعديل المقاول");
+  };
+  const deleteContractor = (id) => {
+    pushUndo("contractors", contractors);
+    saveContractors(contractors.filter((c) => c.id !== id));
+    logAudit("حذف", "مقاول", id);
+    showToast("تم حذف المقاول", "danger");
+  };
+
+  const addContractingClientEntry = (e) => {
+    if (!(Number(e.amount) > 0)) { showToast("المبلغ مطلوب", "danger"); return; }
+    pushUndo("contractingClientEntries", contractingClientEntries);
+    saveContractingClientEntries([...contractingClientEntries, { ...e, amount: Number(e.amount) || 0, id: uid() }]);
+    logAudit("إضافة", "حركة عميل مقاولات", `${e.type === "claim" ? "مستحق" : "مقبوض"} — ${fmtMoney(e.amount)}`);
+    showToast("تم الحفظ");
+  };
+  const deleteContractingClientEntry = (id) => {
+    pushUndo("contractingClientEntries", contractingClientEntries);
+    saveContractingClientEntries(contractingClientEntries.filter((e) => e.id !== id));
+    logAudit("حذف", "حركة عميل مقاولات", id);
+    showToast("تم الحذف", "danger");
+  };
+
+  const addContractingContractorEntry = (e) => {
+    if (!e.contractorId || !(Number(e.amount) > 0)) { showToast("المقاول والمبلغ مطلوبين", "danger"); return; }
+    pushUndo("contractingContractorEntries", contractingContractorEntries);
+    saveContractingContractorEntries([...contractingContractorEntries, { ...e, amount: Number(e.amount) || 0, id: uid() }]);
+    logAudit("إضافة", "حركة مقاول باطن", `${e.type === "claim" ? "مستحق" : "مدفوع"} — ${fmtMoney(e.amount)}`);
+    showToast("تم الحفظ");
+  };
+  const deleteContractingContractorEntry = (id) => {
+    pushUndo("contractingContractorEntries", contractingContractorEntries);
+    saveContractingContractorEntries(contractingContractorEntries.filter((e) => e.id !== id));
+    logAudit("حذف", "حركة مقاول باطن", id);
+    showToast("تم الحذف", "danger");
+  };
+
+  const addContractingBankTx = (t) => {
+    if (!(Number(t.amount) > 0)) { showToast("المبلغ مطلوب", "danger"); return; }
+    pushUndo("contractingBank", contractingBank);
+    saveContractingBank([...contractingBank, { ...t, amount: Number(t.amount) || 0, id: uid() }]);
+    logAudit("إضافة", "حركة بنك المقاولات", `${t.type === "out" ? "خارج" : "داخل"} — ${fmtMoney(t.amount)}`);
+    showToast("تم الحفظ");
+  };
+  const deleteContractingBankTx = (id) => {
+    pushUndo("contractingBank", contractingBank);
+    saveContractingBank(contractingBank.filter((t) => t.id !== id));
+    logAudit("حذف", "حركة بنك المقاولات", id);
+    showToast("تم الحذف", "danger");
+  };
+
   /* ============ خصومات المستخلص (مرتبات/سلف/سولار تدفعه الشركة وتخصمه) ============ */
   const addClaimDeduction = (d) => {
     if (!d.owner || !d.claimMonth || !(Number(d.amount) > 0)) { showToast("الشركة والشهر والمبلغ مطلوبين", "danger"); return; }
@@ -1350,7 +1449,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded || !vehicleMissionsLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded || !vehicleMissionsLoaded || !disbursementRequestsLoaded || !contractorsLoaded || !contractingClientEntriesLoaded || !contractingContractorEntriesLoaded || !contractingBankLoaded;
 
   const NAV_GROUPS = [
     {
@@ -1369,11 +1468,18 @@ export default function App() {
         { key: "database", label: "قاعدة البيانات", icon: Database },
         { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
         { key: "departmentBank", label: "بنك القسم", icon: Building2 },
+        { key: "disbursementRequests", label: "طلبات الصرف", icon: FileSpreadsheet },
         { key: "octaneWallet", label: "محفظة أوكتين (سولار)", icon: Fuel },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
         { key: "accounting", label: "المحاسبة (قيود مزدوجة)", icon: BookOpen },
+      ],
+    },
+    {
+      group: "قسم المقاولات",
+      items: [
+        { key: "contractingDept", label: "قسم المقاولات", icon: HardHat },
       ],
     },
     {
@@ -1645,6 +1751,8 @@ export default function App() {
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
             {view === "claims" && <ClaimsView claims={claims} claimDeductions={claimDeductions} vehicleMissions={vehicleMissions} equipmentCodes={equipmentCodes} expenses={expenses} onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim} onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction} onAddMission={addVehicleMission} onUpdateMission={updateVehicleMission} onDeleteMission={deleteVehicleMission} />}
             {view === "departmentBank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={addBankTransaction} onDelete={deleteBankTransaction} />}
+            {view === "disbursementRequests" && <DisbursementRequestsView requests={disbursementRequests} onAdd={addDisbursementRequest} onUpdate={updateDisbursementRequest} onDelete={deleteDisbursementRequest} onToggleExecuted={markDisbursementExecuted} userEmail={authUser && authUser.email} />}
+            {view === "contractingDept" && <ContractingDeptView contractors={contractors} clientEntries={contractingClientEntries} contractorEntries={contractingContractorEntries} bank={contractingBank} onAddContractor={addContractor} onUpdateContractor={updateContractor} onDeleteContractor={deleteContractor} onAddClientEntry={addContractingClientEntry} onDeleteClientEntry={deleteContractingClientEntry} onAddContractorEntry={addContractingContractorEntry} onDeleteContractorEntry={deleteContractingContractorEntry} onAddBankTx={addContractingBankTx} onDeleteBankTx={deleteContractingBankTx} />}
             {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
@@ -1725,6 +1833,7 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "entry", label: "إدخال بند صرف", desc: "سجّل معاملة مصروف جديدة", icon: FilePlus2, color: "#5B7A9E" },
     { key: "claims", label: "المستخلصات", desc: "استحقاقات واستقطاعات وصافي — بأربع صور حسب مالك المعدة والجهة الشغالة عندها", icon: FileSpreadsheet, color: "#8B9C6E" },
     { key: "departmentBank", label: "بنك القسم", desc: "رصيد كل شركة لوحدها — صافي المستخلصات الداخلة والعهد الخارجة", icon: Building2, color: "#1C2C4A" },
+    { key: "disbursementRequests", label: "طلبات الصرف", desc: "طلب صرف جديد، اعتماد التنفيذ، وطباعة إذن الصرف", icon: FileSpreadsheet, color: "#8A5A00" },
     { key: "octaneWallet", label: "محفظة أوكتين", desc: "شحن ومتابعة رصيد محفظة السولار والكارتات", icon: Fuel, color: "#00838F" },
     { key: "custodies", label: "العهد", desc: "إدارة عهد الصرف لكل جهة", icon: ClipboardList, color: "#647085" },
     { key: "database", label: "قاعدة البيانات", desc: "كل بنود الصرف قابلة للبحث والفلترة", icon: Database, color: "#1C2C4A" },
@@ -6057,6 +6166,38 @@ function ClaimsView({ claims, claimDeductions, vehicleMissions, equipmentCodes, 
     return Object.entries(map).map(([location, total]) => ({ location, total })).sort((a, b) => b.total - a.total);
   }, [list]);
 
+  /* ============ تقرير الاعتماد + جسم المستخلص ============ */
+  const [reportMode, setReportMode] = useState("data"); // data | approval | body
+  const [selectedSite, setSelectedSite] = useState("");
+
+  const allSites = useMemo(() => {
+    const s = new Set();
+    list.forEach((c) => { if (c.location) s.add(c.location); });
+    missionList.forEach((m) => { if (m.from) s.add(m.from); if (m.to) s.add(m.to); });
+    return [...s].sort();
+  }, [list, missionList]);
+
+  useEffect(() => {
+    if (!selectedSite && allSites.length) setSelectedSite(allSites[0]);
+  }, [allSites, selectedSite]);
+
+  const siteEquipmentRows = useMemo(() => list.filter((c) => c.location === selectedSite), [list, selectedSite]);
+  const siteMissionRows = useMemo(() => missionList.filter((m) => m.from === selectedSite || m.to === selectedSite), [missionList, selectedSite]);
+  const siteEquipmentTotal = siteEquipmentRows.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const siteMissionTotal = siteMissionRows.reduce((s, m) => s + (Number(m.total) || 0), 0);
+  const siteGrandTotal = siteEquipmentTotal + siteMissionTotal;
+
+  // بيان توزيع تكلفة استخدام المعدات حسب مواقع العمل (شامل المعدات + مأموريات السيارات لكل موقع)
+  const siteDistribution = useMemo(() => {
+    return allSites.map((site) => {
+      const eq = list.filter((c) => c.location === site).reduce((s, c) => s + (Number(c.total) || 0), 0);
+      const ms = missionList.filter((m) => m.from === site || m.to === site).reduce((s, m) => s + (Number(m.total) || 0), 0);
+      return { site, total: eq + ms };
+    }).filter((r) => r.total > 0).sort((a, b) => b.total - a.total);
+  }, [allSites, list, missionList]);
+  const siteDistributionTotal = siteDistribution.reduce((s, r) => s + r.total, 0);
+  const bodyNet = siteDistributionTotal - dedTotal;
+
   const handlePrint = () => window.print();
 
   return (
@@ -6093,6 +6234,29 @@ function ClaimsView({ claims, claimDeductions, vehicleMissions, equipmentCodes, 
           <button key={m} onClick={() => setActiveMonth(m)} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === m ? COLORS.navy : COLORS.cream, color: activeMonth === m ? "white" : COLORS.slate }}>{m}</button>
         ))}
       </div>
+
+      <div className="no-print flex flex-wrap items-center gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+        {[["data", "بيانات المستخلص"], ["approval", "تقرير الاعتماد (لكل موقع)"], ["body", "جسم المستخلص النهائي"]].map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setReportMode(k)}
+            className="px-4 py-2 rounded-lg text-xs font-bold"
+            style={{ background: reportMode === k ? COLORS.navy : "transparent", color: reportMode === k ? "white" : COLORS.slate }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {reportMode === "approval" && (
+        <div className="no-print max-w-sm">
+          <Field label="اختر الموقع">
+            <Select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}>
+              {allSites.map((s) => <option key={s} value={s}>{s}</option>)}
+            </Select>
+          </Field>
+        </div>
+      )}
 
       {showForm && (
         <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
@@ -7274,6 +7438,463 @@ function AccountingClosingTab({ fiscalClosings, onClose }) {
           </div>
         )}
       </SectionCard>
+    </div>
+  );
+}
+
+/* ============================================================
+   طلبات الصرف
+============================================================ */
+function DisbursementRequestsView({ requests, onAdd, onUpdate, onDelete, onToggleExecuted, userEmail }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [printingId, setPrintingId] = useState(requests[0]?.id || null);
+
+  const emptyLine = () => ({ description: "", amount: "", notes: "" });
+  const empty = {
+    date: todayISO(), owner: SOURCES[0], project: "صيانة وتشغيل معدات الشركة", beneficiary: "",
+    amountInWords: "", disbursementType: "نقدي", documentNumber: "", bankName: "", accountNumber: "",
+    attachments: "", lines: [emptyLine()],
+  };
+  const [form, setForm] = useState(empty);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setLine = (i, k) => (e) => setForm((f) => ({ ...f, lines: f.lines.map((l, idx) => (idx === i ? { ...l, [k]: e.target.value } : l)) }));
+  const addLine = () => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }));
+  const removeLine = (i) => setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+
+  const startAdd = () => { setEditingId(null); setForm(empty); setShowForm(true); };
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setForm({
+      date: r.date || todayISO(), owner: r.owner || SOURCES[0], project: r.project || empty.project, beneficiary: r.beneficiary || "",
+      amountInWords: r.amountInWords || "", disbursementType: r.disbursementType || "نقدي", documentNumber: r.documentNumber || "",
+      bankName: r.bankName || "", accountNumber: r.accountNumber || "", attachments: r.attachments || "",
+      lines: r.lines && r.lines.length ? r.lines : [emptyLine()], code: r.code,
+    });
+    setShowForm(true);
+  };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(empty); };
+
+  const totalAmount = form.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+  const submit = (e) => {
+    e.preventDefault();
+    const lines = form.lines.filter((l) => l.description || Number(l.amount) > 0);
+    const payload = { ...form, lines, totalAmount };
+    if (editingId) onUpdate(editingId, payload); else onAdd(payload);
+    cancel();
+  };
+
+  const printing = requests.find((r) => r.id === printingId);
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="طلبات الصرف"
+        sub="إضافة طلب صرف، اعتماد التنفيذ، وطباعة إذن الصرف الرسمي"
+        action={
+          <button onClick={startAdd} className="no-print px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
+            <Plus size={16} /> طلب صرف جديد
+          </button>
+        }
+      />
+
+      {showForm && (
+        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل طلب صرف" : "طلب صرف جديد"}</h3>
+              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
+              <Field label="الشركة" required><Select value={form.owner} onChange={set("owner")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+              <Field label="نوع الصرف" required>
+                <Select value={form.disbursementType} onChange={set("disbursementType")}>
+                  <option>نقدي</option><option>تحويلات</option><option>شيكات</option>
+                </Select>
+              </Field>
+              <div className="md:col-span-3"><Field label="المشروع"><TextInput value={form.project} onChange={set("project")} /></Field></div>
+              <div className="md:col-span-3"><Field label="لصالح (اسم المستفيد)" required><TextInput value={form.beneficiary} onChange={set("beneficiary")} required placeholder="مثال: عهدة تصرف على موقع الشركة" /></Field></div>
+              <Field label="اسم البنك"><TextInput value={form.bankName} onChange={set("bankName")} /></Field>
+              <Field label="رقم الحساب"><TextInput value={form.accountNumber} onChange={set("accountNumber")} /></Field>
+              <Field label="رقم المستند"><TextInput value={form.documentNumber} onChange={set("documentNumber")} /></Field>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-xs font-bold mb-2" style={{ color: COLORS.slate }}>بيان الطلب</div>
+              <div className="space-y-2">
+                {form.lines.map((l, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-6"><TextInput placeholder="البيان" value={l.description} onChange={setLine(i, "description")} /></div>
+                    <div className="col-span-3"><TextInput type="number" step="0.01" placeholder="المبلغ" value={l.amount} onChange={setLine(i, "amount")} /></div>
+                    <div className="col-span-2"><TextInput placeholder="ملاحظات" value={l.notes} onChange={setLine(i, "notes")} /></div>
+                    <button type="button" onClick={() => removeLine(i)} className="col-span-1 p-2 rounded-md hover:bg-red-50 text-center" style={{ color: COLORS.danger }}><Trash2 size={14} className="inline" /></button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={addLine} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> إضافة بند</button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-4 mt-4">
+              <Field label="المبلغ كتابةً" required><TextInput value={form.amountInWords} onChange={set("amountInWords")} required placeholder="مثال: ثلاثمائة وخمسون ألف جنيها فقط لا غير" /></Field>
+              <Field label="مرفقات"><TextInput value={form.attachments} onChange={set("attachments")} placeholder="اختياري" /></Field>
+            </div>
+
+            <div className="mt-4 text-sm font-bold" style={{ color: COLORS.ink }}>
+              الإجمالي: {fmtMoney(totalAmount)}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-2">
+              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ الطلب"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <SectionCard title={`طلبات الصرف (${requests.length})`}>
+        {requests.length === 0 ? (
+          <EmptyState icon={FileSpreadsheet} title="لا توجد طلبات صرف بعد" />
+        ) : (
+          <div className="overflow-x-auto -mx-5">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                  {["الكود", "التاريخ", "الشركة", "لصالح", "الإجمالي", "الحالة", ""].map((h) => (
+                    <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {requests.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((r) => (
+                  <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{r.code}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{r.owner}</td>
+                    <td className="px-3 py-2.5">{r.beneficiary}</td>
+                    <td className="px-3 py-2.5 font-bold tabular-nums whitespace-nowrap">{fmtMoney(r.totalAmount)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <button onClick={() => onToggleExecuted(r.id)} className="px-2.5 py-1 rounded-md text-xs font-bold" style={{ background: r.status === "executed" ? "#EAF3EC" : "#FDF3E3", color: r.status === "executed" ? "#1B5E20" : "#8A5A00" }}>
+                        {r.status === "executed" ? "تم التنفيذ ✓" : "لم يُنفَّذ بعد"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { setPrintingId(r.id); setTimeout(handlePrint, 100); }} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Printer size={14} /></button>
+                        <button onClick={() => startEdit(r)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                        <button onClick={() => onDelete(r.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {printing && (
+        <div id="print-area" className="bg-white border rounded-2xl p-8 text-sm" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
+          <div className="flex items-center justify-between border-b-2 pb-3 mb-4" style={{ borderColor: "#101A2E" }}>
+            <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 44, objectFit: "contain" }} />
+            <div className="font-extrabold text-lg display-font" style={{ color: "#C69A3C" }}>طلب صرف</div>
+          </div>
+
+          <div className="flex justify-between mb-4 text-xs">
+            <div>
+              <div className="font-bold">{printing.code}</div>
+            </div>
+            <div className="text-left">
+              <div className="font-bold mb-1">المشروع</div>
+              <div>{printing.project}</div>
+              <div className="font-bold mt-2 mb-1">لصالح</div>
+              <div>{printing.beneficiary}</div>
+            </div>
+          </div>
+
+          <table className="w-full border-collapse text-sm mb-3">
+            <thead>
+              <tr style={{ background: "#101A2E", color: "white" }}>
+                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>ملاحظات</th>
+                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>بيان</th>
+                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>كلي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printing.lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="border px-3 py-2 text-xs" style={{ borderColor: "#E3DDCE" }}>{l.notes || ""}</td>
+                  <td className="border px-3 py-2" style={{ borderColor: "#E3DDCE" }}>{l.description}</td>
+                  <td className="border px-3 py-2 tabular-nums font-bold" style={{ borderColor: "#E3DDCE" }}>{fmtNum(l.amount)}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#F3EEDD" }}>
+                <td colSpan={2} className="border px-3 py-2 font-extrabold" style={{ borderColor: "#E3DDCE" }}>{printing.amountInWords}</td>
+                <td className="border px-3 py-2 font-extrabold tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtNum(printing.totalAmount)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {printing.attachments && (
+            <div className="text-xs mb-4"><b>مرفقات:</b> {printing.attachments}</div>
+          )}
+
+          <div className="text-center font-bold underline my-4">إذن الصرف</div>
+          <div className="flex justify-between text-xs mb-2">
+            <div>التاريخ: {printing.date}</div>
+            <div>يُعتمد صرف مبلغ وقدره <b>{fmtMoney(printing.totalAmount)}</b> — {printing.amountInWords}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-6 mt-4 text-xs">
+            <div>
+              <div className="font-bold mb-1">بيانات المستفيد</div>
+              <div>اسم المستفيد / {printing.beneficiary}</div>
+              <div>اسم البنك / {printing.bankName || "—"}</div>
+              <div>رقم الحساب / {printing.accountNumber || "—"}</div>
+            </div>
+            <div>
+              <div className="font-bold mb-1">بيانات الصرف</div>
+              <div>نوع الصرف / {printing.disbursementType}</div>
+              <div>رقم المستند / {printing.documentNumber || "—"}</div>
+              <div>الحالة / {printing.status === "executed" ? "تم التنفيذ" : "لم يُنفَّذ بعد"}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-6 mt-8 pt-4">
+            {["مدير الفرع", "رئيس قسم المراجعة", "رئيس قسم الحسابات", "المحاسب"].map((s) => (
+              <div key={s} className="text-center">
+                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>{s}</div>
+              </div>
+            ))}
+          </div>
+          {userEmail && (
+            <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
+              طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   قسم المقاولات — عميل (الشركة الأم) + مقاولين الباطن + بنك خاص بالقسم
+============================================================ */
+function ContractingDeptView({
+  contractors, clientEntries, contractorEntries, bank,
+  onAddContractor, onUpdateContractor, onDeleteContractor,
+  onAddClientEntry, onDeleteClientEntry,
+  onAddContractorEntry, onDeleteContractorEntry,
+  onAddBankTx, onDeleteBankTx,
+}) {
+  const [tab, setTab] = useState("client"); // client | contractors | bank
+
+  const [showContractorForm, setShowContractorForm] = useState(false);
+  const [contractorForm, setContractorForm] = useState({ name: "", notes: "" });
+
+  const [showClientForm, setShowClientForm] = useState(false);
+  const [clientForm, setClientForm] = useState({ date: todayISO(), type: "claim", description: "", amount: "" });
+
+  const [selectedContractorId, setSelectedContractorId] = useState(contractors[0]?.id || "");
+  const [showContractorEntryForm, setShowContractorEntryForm] = useState(false);
+  const [contractorEntryForm, setContractorEntryForm] = useState({ date: todayISO(), type: "claim", description: "", amount: "" });
+
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [bankForm, setBankForm] = useState({ date: todayISO(), type: "in", description: "", amount: "" });
+
+  const clientClaimTotal = clientEntries.filter((e) => e.type === "claim").reduce((s, e) => s + e.amount, 0);
+  const clientPaidTotal = clientEntries.filter((e) => e.type === "payment").reduce((s, e) => s + e.amount, 0);
+  const clientBalance = clientClaimTotal - clientPaidTotal;
+
+  const contractorTotals = (id) => {
+    const rows = contractorEntries.filter((e) => e.contractorId === id);
+    const claimT = rows.filter((e) => e.type === "claim").reduce((s, e) => s + e.amount, 0);
+    const paidT = rows.filter((e) => e.type === "payment").reduce((s, e) => s + e.amount, 0);
+    return { claimT, paidT, balance: claimT - paidT };
+  };
+  const allContractorsClaimTotal = contractors.reduce((s, c) => s + contractorTotals(c.id).claimT, 0);
+  const margin = clientClaimTotal - allContractorsClaimTotal;
+
+  const bankTotalIn = bank.filter((t) => t.type !== "out").reduce((s, t) => s + t.amount, 0);
+  const bankTotalOut = bank.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
+  const bankBalance = bankTotalIn - bankTotalOut;
+
+  const submitContractor = (e) => { e.preventDefault(); onAddContractor(contractorForm); setContractorForm({ name: "", notes: "" }); setShowContractorForm(false); };
+  const submitClient = (e) => { e.preventDefault(); onAddClientEntry(clientForm); setClientForm({ date: todayISO(), type: "claim", description: "", amount: "" }); setShowClientForm(false); };
+  const submitContractorEntry = (e) => { e.preventDefault(); onAddContractorEntry({ ...contractorEntryForm, contractorId: selectedContractorId }); setContractorEntryForm({ date: todayISO(), type: "claim", description: "", amount: "" }); setShowContractorEntryForm(false); };
+  const submitBank = (e) => { e.preventDefault(); onAddBankTx(bankForm); setBankForm({ date: todayISO(), type: "in", description: "", amount: "" }); setShowBankForm(false); };
+
+  return (
+    <div className="space-y-6">
+      <Header title="قسم المقاولات" sub="شغل بياخده القسم من الشركة الأم ويبيعه لمقاولين باطن — مستحقات ومقبوضات العميل، ومستحقات ومدفوعات كل مقاول، وبنك خاص بالقسم" />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>رصيد العميل (مستحق ليك)</div>
+          <div className="text-lg font-extrabold tabular-nums" style={{ color: clientBalance >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(clientBalance)}</div>
+        </div>
+        <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي مستحق للمقاولين</div>
+          <div className="text-lg font-extrabold tabular-nums" style={{ color: COLORS.danger }}>{fmtMoney(allContractorsClaimTotal)}</div>
+        </div>
+        <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>هامش الربح التقريبي</div>
+          <div className="text-lg font-extrabold tabular-nums" style={{ color: margin >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(margin)}</div>
+        </div>
+        <div className="p-4 rounded-xl" style={{ background: COLORS.navy }}>
+          <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.7)" }}>رصيد بنك القسم</div>
+          <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(bankBalance)}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+        {[["client", "العميل (الشركة الأم)"], ["contractors", "مقاولين الباطن"], ["bank", "بنك القسم"]].map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: tab === k ? COLORS.navy : "transparent", color: tab === k ? "white" : COLORS.slate }}>{label}</button>
+        ))}
+      </div>
+
+      {tab === "client" && (
+        <SectionCard
+          title={`حركات العميل (${clientEntries.length}) — مستحق ${fmtMoney(clientClaimTotal)} — مقبوض ${fmtMoney(clientPaidTotal)}`}
+          action={<button onClick={() => setShowClientForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+        >
+          {showClientForm && (
+            <form onSubmit={submitClient} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+              <Field label="التاريخ" required><TextInput type="date" value={clientForm.date} onChange={(e) => setClientForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+              <Field label="النوع" required>
+                <Select value={clientForm.type} onChange={(e) => setClientForm((f) => ({ ...f, type: e.target.value }))}>
+                  <option value="claim">مستحق (مستخلص للعميل)</option>
+                  <option value="payment">مقبوض (دفعة من العميل)</option>
+                </Select>
+              </Field>
+              <div className="md:col-span-1"><Field label="الوصف"><TextInput value={clientForm.description} onChange={(e) => setClientForm((f) => ({ ...f, description: e.target.value }))} /></Field></div>
+              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={clientForm.amount} onChange={(e) => setClientForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
+              <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+            </form>
+          )}
+          {clientEntries.length === 0 ? (
+            <EmptyState icon={FileSpreadsheet} title="لا توجد حركات بعد" />
+          ) : (
+            <div className="space-y-1.5">
+              {clientEntries.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((e) => (
+                <div key={e.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
+                  <span>{e.date} — {e.type === "claim" ? "مستحق" : "مقبوض"}{e.description ? ` — ${e.description}` : ""}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold tabular-nums" style={{ color: e.type === "claim" ? "#1B5E20" : COLORS.danger }}>{fmtMoney(e.amount)}</span>
+                    <button onClick={() => onDeleteClientEntry(e.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {tab === "contractors" && (
+        <div className="space-y-4">
+          <SectionCard title={`مقاولين الباطن (${contractors.length})`} action={<button onClick={() => setShowContractorForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مقاول جديد</button>}>
+            {showContractorForm && (
+              <form onSubmit={submitContractor} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                <Field label="اسم المقاول" required><TextInput value={contractorForm.name} onChange={(e) => setContractorForm((f) => ({ ...f, name: e.target.value }))} required /></Field>
+                <div className="md:col-span-2"><Field label="ملاحظات"><TextInput value={contractorForm.notes} onChange={(e) => setContractorForm((f) => ({ ...f, notes: e.target.value }))} /></Field></div>
+                <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+              </form>
+            )}
+            {contractors.length === 0 ? (
+              <EmptyState icon={ClipboardList} title="لا يوجد مقاولين مسجلين بعد" />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {contractors.map((c) => {
+                  const t = contractorTotals(c.id);
+                  return (
+                    <button key={c.id} onClick={() => setSelectedContractorId(c.id)} className="text-right p-3 rounded-lg border" style={{ borderColor: selectedContractorId === c.id ? COLORS.navy : COLORS.border, background: selectedContractorId === c.id ? COLORS.cream : "transparent" }}>
+                      <div className="font-bold text-sm">{c.name}</div>
+                      <div className="text-xs mt-1" style={{ color: t.balance >= 0 ? "#1B5E20" : COLORS.danger }}>مستحق له: {fmtMoney(t.balance)}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
+
+          {selectedContractorId && (
+            <SectionCard
+              title={`حركات ${contractors.find((c) => c.id === selectedContractorId)?.name || ""}`}
+              action={<button onClick={() => setShowContractorEntryForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+            >
+              {showContractorEntryForm && (
+                <form onSubmit={submitContractorEntry} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                  <Field label="التاريخ" required><TextInput type="date" value={contractorEntryForm.date} onChange={(e) => setContractorEntryForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+                  <Field label="النوع" required>
+                    <Select value={contractorEntryForm.type} onChange={(e) => setContractorEntryForm((f) => ({ ...f, type: e.target.value }))}>
+                      <option value="claim">مستحق له (مستخلص المقاول)</option>
+                      <option value="payment">مدفوع له (دفعة للمقاول)</option>
+                    </Select>
+                  </Field>
+                  <Field label="الوصف"><TextInput value={contractorEntryForm.description} onChange={(e) => setContractorEntryForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+                  <Field label="المبلغ" required><TextInput type="number" step="0.01" value={contractorEntryForm.amount} onChange={(e) => setContractorEntryForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
+                  <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+                </form>
+              )}
+              {contractorEntries.filter((e) => e.contractorId === selectedContractorId).length === 0 ? (
+                <EmptyState icon={FileSpreadsheet} title="لا توجد حركات بعد" />
+              ) : (
+                <div className="space-y-1.5">
+                  {contractorEntries.filter((e) => e.contractorId === selectedContractorId).slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((e) => (
+                    <div key={e.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
+                      <span>{e.date} — {e.type === "claim" ? "مستحق له" : "مدفوع له"}{e.description ? ` — ${e.description}` : ""}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold tabular-nums" style={{ color: e.type === "claim" ? COLORS.danger : "#1B5E20" }}>{fmtMoney(e.amount)}</span>
+                        <button onClick={() => onDeleteContractorEntry(e.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          )}
+        </div>
+      )}
+
+      {tab === "bank" && (
+        <SectionCard
+          title={`بنك قسم المقاولات (${bank.length}) — الرصيد ${fmtMoney(bankBalance)}`}
+          action={<button onClick={() => setShowBankForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+        >
+          {showBankForm && (
+            <form onSubmit={submitBank} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+              <Field label="التاريخ" required><TextInput type="date" value={bankForm.date} onChange={(e) => setBankForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+              <Field label="النوع" required>
+                <Select value={bankForm.type} onChange={(e) => setBankForm((f) => ({ ...f, type: e.target.value }))}>
+                  <option value="in">داخل</option>
+                  <option value="out">خارج</option>
+                </Select>
+              </Field>
+              <Field label="الوصف"><TextInput value={bankForm.description} onChange={(e) => setBankForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={bankForm.amount} onChange={(e) => setBankForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
+              <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+            </form>
+          )}
+          {bank.length === 0 ? (
+            <EmptyState icon={Building2} title="لا توجد حركات بعد" />
+          ) : (
+            <div className="space-y-1.5">
+              {bank.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((t) => (
+                <div key={t.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
+                  <span>{t.date} — {t.description || (t.type === "out" ? "خارج" : "داخل")}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold tabular-nums" style={{ color: t.type === "out" ? COLORS.danger : "#1B5E20" }}>{fmtMoney(t.amount)}</span>
+                    <button onClick={() => onDeleteBankTx(t.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
     </div>
   );
 }
