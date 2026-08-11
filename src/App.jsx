@@ -7695,15 +7695,29 @@ function ContractingDeptView({
   const [showContractorForm, setShowContractorForm] = useState(false);
   const [contractorForm, setContractorForm] = useState({ name: "", notes: "" });
 
+  const emptyClaim = { date: todayISO(), type: "claim", description: "", grossAmount: "", vatPercent: "14", whtPercent: "1", retentionPercent: "5", equipmentDeduction: "", otherDeduction: "" };
   const [showClientForm, setShowClientForm] = useState(false);
-  const [clientForm, setClientForm] = useState({ date: todayISO(), type: "claim", description: "", amount: "" });
+  const [clientForm, setClientForm] = useState(emptyClaim);
 
   const [selectedContractorId, setSelectedContractorId] = useState(contractors[0]?.id || "");
   const [showContractorEntryForm, setShowContractorEntryForm] = useState(false);
-  const [contractorEntryForm, setContractorEntryForm] = useState({ date: todayISO(), type: "claim", description: "", amount: "" });
+  const [contractorEntryForm, setContractorEntryForm] = useState(emptyClaim);
 
   const [showBankForm, setShowBankForm] = useState(false);
   const [bankForm, setBankForm] = useState({ date: todayISO(), type: "in", description: "", amount: "" });
+
+  const [printingEntry, setPrintingEntry] = useState(null); // { entry, contractorName } لنموذج التصفية
+
+  // بيحسب صافي المستخلص من إجمالي حجم العمل + الضريبة - الخصومات
+  const computeNet = (f) => {
+    const gross = Number(f.grossAmount) || 0;
+    const vat = gross * ((Number(f.vatPercent) || 0) / 100);
+    const wht = gross * ((Number(f.whtPercent) || 0) / 100);
+    const retention = gross * ((Number(f.retentionPercent) || 0) / 100);
+    const equip = Number(f.equipmentDeduction) || 0;
+    const other = Number(f.otherDeduction) || 0;
+    return { gross, vat, wht, retention, equip, other, net: gross + vat - wht - retention - equip - other };
+  };
 
   const clientClaimTotal = clientEntries.filter((e) => e.type === "claim").reduce((s, e) => s + e.amount, 0);
   const clientPaidTotal = clientEntries.filter((e) => e.type === "payment").reduce((s, e) => s + e.amount, 0);
@@ -7723,13 +7737,45 @@ function ContractingDeptView({
   const bankBalance = bankTotalIn - bankTotalOut;
 
   const submitContractor = (e) => { e.preventDefault(); onAddContractor(contractorForm); setContractorForm({ name: "", notes: "" }); setShowContractorForm(false); };
-  const submitClient = (e) => { e.preventDefault(); onAddClientEntry(clientForm); setClientForm({ date: todayISO(), type: "claim", description: "", amount: "" }); setShowClientForm(false); };
-  const submitContractorEntry = (e) => { e.preventDefault(); onAddContractorEntry({ ...contractorEntryForm, contractorId: selectedContractorId }); setContractorEntryForm({ date: todayISO(), type: "claim", description: "", amount: "" }); setShowContractorEntryForm(false); };
+
+  const submitClient = (e) => {
+    e.preventDefault();
+    const payload = clientForm.type === "claim" ? { ...clientForm, ...computeClientPayload(clientForm) } : clientForm;
+    onAddClientEntry(payload);
+    setClientForm(emptyClaim);
+    setShowClientForm(false);
+  };
+  function computeClientPayload(f) {
+    const c = computeNet(f); // العميل عادة من غير خصومات معدات/أخرى، بس سيبناها لو احتاجوها
+    return { grossAmount: c.gross, vatPercent: f.vatPercent, whtPercent: f.whtPercent, retentionPercent: f.retentionPercent, amount: c.net };
+  }
+
+  const submitContractorEntry = (e) => {
+    e.preventDefault();
+    const base = { ...contractorEntryForm, contractorId: selectedContractorId };
+    if (contractorEntryForm.type === "claim") {
+      const c = computeNet(contractorEntryForm);
+      onAddContractorEntry({ ...base, grossAmount: c.gross, vatPercent: contractorEntryForm.vatPercent, whtPercent: contractorEntryForm.whtPercent, retentionPercent: contractorEntryForm.retentionPercent, equipmentDeduction: c.equip, otherDeduction: c.other, amount: c.net });
+    } else {
+      onAddContractorEntry(base);
+    }
+    setContractorEntryForm(emptyClaim);
+    setShowContractorEntryForm(false);
+  };
   const submitBank = (e) => { e.preventDefault(); onAddBankTx(bankForm); setBankForm({ date: todayISO(), type: "in", description: "", amount: "" }); setShowBankForm(false); };
+
+  const clientPreview = computeNet(clientForm);
+  const contractorPreview = computeNet(contractorEntryForm);
+
+  const printSettlement = (entry, subjectLabel) => { setPrintingEntry({ entry, subjectLabel }); setTimeout(() => window.print(), 100); };
 
   return (
     <div className="space-y-6">
       <Header title="قسم المقاولات" sub="شغل بياخده القسم من الشركة الأم ويبيعه لمقاولين باطن — مستحقات ومقبوضات العميل، ومستحقات ومدفوعات كل مقاول، وبنك خاص بالقسم" />
+
+      <div className="no-print p-3 rounded-lg text-xs font-bold flex items-center gap-2" style={{ background: "#FDF3E3", color: "#8A5A00" }}>
+        <AlertTriangle size={14} /> المصروفات الشهرية الثابتة (تعاقدات سيارات، إيجارات أجهزة مساحية، رواتب) سجّلها من تاب "طلبات الصرف" زي أي مصروف تاني — التاب ده مخصص بس للمستخلصات والمدفوعات المرتبطة بالعميل والمقاولين.
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="p-4 rounded-xl" style={{ background: COLORS.paper, border: `1px solid ${COLORS.border}` }}>
@@ -7750,7 +7796,7 @@ function ContractingDeptView({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+      <div className="no-print flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
         {[["client", "العميل (الشركة الأم)"], ["contractors", "مقاولين الباطن"], ["bank", "بنك القسم"]].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: tab === k ? COLORS.navy : "transparent", color: tab === k ? "white" : COLORS.slate }}>{label}</button>
         ))}
@@ -7759,20 +7805,41 @@ function ContractingDeptView({
       {tab === "client" && (
         <SectionCard
           title={`حركات العميل (${clientEntries.length}) — مستحق ${fmtMoney(clientClaimTotal)} — مقبوض ${fmtMoney(clientPaidTotal)}`}
-          action={<button onClick={() => setShowClientForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+          action={<button onClick={() => setShowClientForm((s) => !s)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
         >
           {showClientForm && (
-            <form onSubmit={submitClient} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
-              <Field label="التاريخ" required><TextInput type="date" value={clientForm.date} onChange={(e) => setClientForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
-              <Field label="النوع" required>
-                <Select value={clientForm.type} onChange={(e) => setClientForm((f) => ({ ...f, type: e.target.value }))}>
-                  <option value="claim">مستحق (مستخلص للعميل)</option>
-                  <option value="payment">مقبوض (دفعة من العميل)</option>
-                </Select>
-              </Field>
-              <div className="md:col-span-1"><Field label="الوصف"><TextInput value={clientForm.description} onChange={(e) => setClientForm((f) => ({ ...f, description: e.target.value }))} /></Field></div>
-              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={clientForm.amount} onChange={(e) => setClientForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
-              <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+            <form onSubmit={submitClient} className="space-y-3 mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <Field label="التاريخ" required><TextInput type="date" value={clientForm.date} onChange={(e) => setClientForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+                <Field label="النوع" required>
+                  <Select value={clientForm.type} onChange={(e) => setClientForm((f) => ({ ...f, type: e.target.value }))}>
+                    <option value="claim">مستحق (مستخلص للعميل)</option>
+                    <option value="payment">مقبوض (دفعة من العميل)</option>
+                  </Select>
+                </Field>
+                <Field label="الوصف"><TextInput value={clientForm.description} onChange={(e) => setClientForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+              </div>
+
+              {clientForm.type === "claim" ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <Field label="إجمالي حجم العمل" required><TextInput type="number" step="0.01" value={clientForm.grossAmount} onChange={(e) => setClientForm((f) => ({ ...f, grossAmount: e.target.value }))} required /></Field>
+                    <Field label="ض.ق.م %"><TextInput type="number" step="0.01" value={clientForm.vatPercent} onChange={(e) => setClientForm((f) => ({ ...f, vatPercent: e.target.value }))} /></Field>
+                    <Field label="خصم تحت حساب الضريبة %"><TextInput type="number" step="0.01" value={clientForm.whtPercent} onChange={(e) => setClientForm((f) => ({ ...f, whtPercent: e.target.value }))} /></Field>
+                    <Field label="ضمان أعمال %"><TextInput type="number" step="0.01" value={clientForm.retentionPercent} onChange={(e) => setClientForm((f) => ({ ...f, retentionPercent: e.target.value }))} /></Field>
+                  </div>
+                  <div className="text-xs space-y-1 p-2 rounded-lg bg-white">
+                    <div className="flex justify-between"><span>إجمالي حجم العمل</span><b>{fmtMoney(clientPreview.gross)}</b></div>
+                    <div className="flex justify-between" style={{ color: "#1B5E20" }}><span>+ ض.ق.م</span><b>{fmtMoney(clientPreview.vat)}</b></div>
+                    <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- خصم تحت حساب الضريبة</span><b>{fmtMoney(clientPreview.wht)}</b></div>
+                    <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- ضمان أعمال</span><b>{fmtMoney(clientPreview.retention)}</b></div>
+                    <div className="flex justify-between pt-1 border-t font-extrabold"><span>الصافي المستحق</span><b>{fmtMoney(clientPreview.net)}</b></div>
+                  </div>
+                </>
+              ) : (
+                <Field label="المبلغ" required><TextInput type="number" step="0.01" value={clientForm.amount || ""} onChange={(e) => setClientForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
+              )}
+              <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
             </form>
           )}
           {clientEntries.length === 0 ? (
@@ -7781,10 +7848,11 @@ function ContractingDeptView({
             <div className="space-y-1.5">
               {clientEntries.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((e) => (
                 <div key={e.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
-                  <span>{e.date} — {e.type === "claim" ? "مستحق" : "مقبوض"}{e.description ? ` — ${e.description}` : ""}</span>
+                  <span>{e.date} — {e.type === "claim" ? "مستحق (صافي)" : "مقبوض"}{e.description ? ` — ${e.description}` : ""}</span>
                   <div className="flex items-center gap-2">
                     <span className="font-bold tabular-nums" style={{ color: e.type === "claim" ? "#1B5E20" : COLORS.danger }}>{fmtMoney(e.amount)}</span>
-                    <button onClick={() => onDeleteClientEntry(e.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                    {e.type === "claim" && <button onClick={() => printSettlement(e, "مستخلص العميل")} className="no-print p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Printer size={12} /></button>}
+                    <button onClick={() => onDeleteClientEntry(e.id)} className="no-print p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
                   </div>
                 </div>
               ))}
@@ -7795,7 +7863,7 @@ function ContractingDeptView({
 
       {tab === "contractors" && (
         <div className="space-y-4">
-          <SectionCard title={`مقاولين الباطن (${contractors.length})`} action={<button onClick={() => setShowContractorForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مقاول جديد</button>}>
+          <SectionCard title={`مقاولين الباطن (${contractors.length})`} action={<button onClick={() => setShowContractorForm((s) => !s)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مقاول جديد</button>}>
             {showContractorForm && (
               <form onSubmit={submitContractor} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
                 <Field label="اسم المقاول" required><TextInput value={contractorForm.name} onChange={(e) => setContractorForm((f) => ({ ...f, name: e.target.value }))} required /></Field>
@@ -7823,20 +7891,47 @@ function ContractingDeptView({
           {selectedContractorId && (
             <SectionCard
               title={`حركات ${contractors.find((c) => c.id === selectedContractorId)?.name || ""}`}
-              action={<button onClick={() => setShowContractorEntryForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+              action={<button onClick={() => setShowContractorEntryForm((s) => !s)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
             >
               {showContractorEntryForm && (
-                <form onSubmit={submitContractorEntry} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
-                  <Field label="التاريخ" required><TextInput type="date" value={contractorEntryForm.date} onChange={(e) => setContractorEntryForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
-                  <Field label="النوع" required>
-                    <Select value={contractorEntryForm.type} onChange={(e) => setContractorEntryForm((f) => ({ ...f, type: e.target.value }))}>
-                      <option value="claim">مستحق له (مستخلص المقاول)</option>
-                      <option value="payment">مدفوع له (دفعة للمقاول)</option>
-                    </Select>
-                  </Field>
-                  <Field label="الوصف"><TextInput value={contractorEntryForm.description} onChange={(e) => setContractorEntryForm((f) => ({ ...f, description: e.target.value }))} /></Field>
-                  <Field label="المبلغ" required><TextInput type="number" step="0.01" value={contractorEntryForm.amount} onChange={(e) => setContractorEntryForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
-                  <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+                <form onSubmit={submitContractorEntry} className="space-y-3 mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                    <Field label="التاريخ" required><TextInput type="date" value={contractorEntryForm.date} onChange={(e) => setContractorEntryForm((f) => ({ ...f, date: e.target.value }))} required /></Field>
+                    <Field label="النوع" required>
+                      <Select value={contractorEntryForm.type} onChange={(e) => setContractorEntryForm((f) => ({ ...f, type: e.target.value }))}>
+                        <option value="claim">مستحق له (مستخلص المقاول)</option>
+                        <option value="payment">مدفوع له (دفعة للمقاول)</option>
+                      </Select>
+                    </Field>
+                    <Field label="الوصف"><TextInput value={contractorEntryForm.description} onChange={(e) => setContractorEntryForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+                  </div>
+
+                  {contractorEntryForm.type === "claim" ? (
+                    <>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <Field label="إجمالي حجم العمل" required><TextInput type="number" step="0.01" value={contractorEntryForm.grossAmount} onChange={(e) => setContractorEntryForm((f) => ({ ...f, grossAmount: e.target.value }))} required /></Field>
+                        <Field label="ض.ق.م %"><TextInput type="number" step="0.01" value={contractorEntryForm.vatPercent} onChange={(e) => setContractorEntryForm((f) => ({ ...f, vatPercent: e.target.value }))} /></Field>
+                        <Field label="خصم تحت حساب الضريبة %"><TextInput type="number" step="0.01" value={contractorEntryForm.whtPercent} onChange={(e) => setContractorEntryForm((f) => ({ ...f, whtPercent: e.target.value }))} /></Field>
+                        <Field label="ضمان أعمال %"><TextInput type="number" step="0.01" value={contractorEntryForm.retentionPercent} onChange={(e) => setContractorEntryForm((f) => ({ ...f, retentionPercent: e.target.value }))} /></Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="استقطاع معدات مؤجرة"><TextInput type="number" step="0.01" value={contractorEntryForm.equipmentDeduction} onChange={(e) => setContractorEntryForm((f) => ({ ...f, equipmentDeduction: e.target.value }))} placeholder="0" /></Field>
+                        <Field label="استقطاعات أخرى"><TextInput type="number" step="0.01" value={contractorEntryForm.otherDeduction} onChange={(e) => setContractorEntryForm((f) => ({ ...f, otherDeduction: e.target.value }))} placeholder="0" /></Field>
+                      </div>
+                      <div className="text-xs space-y-1 p-2 rounded-lg bg-white">
+                        <div className="flex justify-between"><span>إجمالي حجم العمل</span><b>{fmtMoney(contractorPreview.gross)}</b></div>
+                        <div className="flex justify-between" style={{ color: "#1B5E20" }}><span>+ ض.ق.م</span><b>{fmtMoney(contractorPreview.vat)}</b></div>
+                        <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- خصم تحت حساب الضريبة</span><b>{fmtMoney(contractorPreview.wht)}</b></div>
+                        <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- ضمان أعمال</span><b>{fmtMoney(contractorPreview.retention)}</b></div>
+                        <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- معدات مؤجرة</span><b>{fmtMoney(contractorPreview.equip)}</b></div>
+                        <div className="flex justify-between" style={{ color: COLORS.danger }}><span>- استقطاعات أخرى</span><b>{fmtMoney(contractorPreview.other)}</b></div>
+                        <div className="flex justify-between pt-1 border-t font-extrabold"><span>الصافي المستحق</span><b>{fmtMoney(contractorPreview.net)}</b></div>
+                      </div>
+                    </>
+                  ) : (
+                    <Field label="المبلغ" required><TextInput type="number" step="0.01" value={contractorEntryForm.amount || ""} onChange={(e) => setContractorEntryForm((f) => ({ ...f, amount: e.target.value }))} required /></Field>
+                  )}
+                  <button type="submit" className="px-4 py-2.5 rounded-lg text-sm font-bold text-white w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
                 </form>
               )}
               {contractorEntries.filter((e) => e.contractorId === selectedContractorId).length === 0 ? (
@@ -7845,10 +7940,11 @@ function ContractingDeptView({
                 <div className="space-y-1.5">
                   {contractorEntries.filter((e) => e.contractorId === selectedContractorId).slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((e) => (
                     <div key={e.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
-                      <span>{e.date} — {e.type === "claim" ? "مستحق له" : "مدفوع له"}{e.description ? ` — ${e.description}` : ""}</span>
+                      <span>{e.date} — {e.type === "claim" ? "مستحق له (صافي)" : "مدفوع له"}{e.description ? ` — ${e.description}` : ""}</span>
                       <div className="flex items-center gap-2">
                         <span className="font-bold tabular-nums" style={{ color: e.type === "claim" ? COLORS.danger : "#1B5E20" }}>{fmtMoney(e.amount)}</span>
-                        <button onClick={() => onDeleteContractorEntry(e.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                        {e.type === "claim" && <button onClick={() => printSettlement(e, `مستخلص مقاول — ${contractors.find((c) => c.id === selectedContractorId)?.name || ""}`)} className="no-print p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Printer size={12} /></button>}
+                        <button onClick={() => onDeleteContractorEntry(e.id)} className="no-print p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
                       </div>
                     </div>
                   ))}
@@ -7862,7 +7958,7 @@ function ContractingDeptView({
       {tab === "bank" && (
         <SectionCard
           title={`بنك قسم المقاولات (${bank.length}) — الرصيد ${fmtMoney(bankBalance)}`}
-          action={<button onClick={() => setShowBankForm((s) => !s)} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
+          action={<button onClick={() => setShowBankForm((s) => !s)} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> حركة جديدة</button>}
         >
           {showBankForm && (
             <form onSubmit={submitBank} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mb-4 p-3 rounded-lg" style={{ background: COLORS.cream }}>
@@ -7887,13 +7983,52 @@ function ContractingDeptView({
                   <span>{t.date} — {t.description || (t.type === "out" ? "خارج" : "داخل")}</span>
                   <div className="flex items-center gap-2">
                     <span className="font-bold tabular-nums" style={{ color: t.type === "out" ? COLORS.danger : "#1B5E20" }}>{fmtMoney(t.amount)}</span>
-                    <button onClick={() => onDeleteBankTx(t.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                    <button onClick={() => onDeleteBankTx(t.id)} className="no-print p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </SectionCard>
+      )}
+
+      {printingEntry && (
+        <div id="print-area" className="bg-white border rounded-2xl p-8 text-sm" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
+          <div className="flex items-center justify-between border-b-2 pb-3 mb-4" style={{ borderColor: "#101A2E" }}>
+            <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 44, objectFit: "contain" }} />
+            <div className="text-center">
+              <div className="font-extrabold text-lg display-font" style={{ color: "#C69A3C" }}>نموذج تصفية مالية</div>
+              <div className="font-bold text-sm">{printingEntry.subjectLabel}</div>
+            </div>
+            <div className="text-left text-xs" style={{ color: "#5B6579" }}>
+              <div>التاريخ: {printingEntry.entry.date}</div>
+            </div>
+          </div>
+          {printingEntry.entry.description && <div className="text-xs mb-3"><b>البيان:</b> {printingEntry.entry.description}</div>}
+          <table className="w-full border-collapse text-sm">
+            <tbody>
+              <tr><td className="border px-3 py-2 font-bold" style={{ borderColor: "#E3DDCE" }}>إجمالي حجم العمل</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE" }}>{fmtMoney(printingEntry.entry.grossAmount)}</td></tr>
+              <tr><td className="border px-3 py-2" style={{ borderColor: "#E3DDCE", color: "#1B5E20" }}>+ ضريبة القيمة المضافة ({printingEntry.entry.vatPercent}%)</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE", color: "#1B5E20" }}>{fmtMoney((Number(printingEntry.entry.grossAmount) || 0) * ((Number(printingEntry.entry.vatPercent) || 0) / 100))}</td></tr>
+              <tr><td className="border px-3 py-2" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>- خصم تحت حساب الضريبة ({printingEntry.entry.whtPercent}%)</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>{fmtMoney((Number(printingEntry.entry.grossAmount) || 0) * ((Number(printingEntry.entry.whtPercent) || 0) / 100))}</td></tr>
+              <tr><td className="border px-3 py-2" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>- ضمان أعمال ({printingEntry.entry.retentionPercent}%)</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>{fmtMoney((Number(printingEntry.entry.grossAmount) || 0) * ((Number(printingEntry.entry.retentionPercent) || 0) / 100))}</td></tr>
+              {Number(printingEntry.entry.equipmentDeduction) > 0 && (
+                <tr><td className="border px-3 py-2" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>- استقطاع معدات مؤجرة</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>{fmtMoney(printingEntry.entry.equipmentDeduction)}</td></tr>
+              )}
+              {Number(printingEntry.entry.otherDeduction) > 0 && (
+                <tr><td className="border px-3 py-2" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>- استقطاعات أخرى</td><td className="border px-3 py-2 tabular-nums text-left" style={{ borderColor: "#E3DDCE", color: "#B5453A" }}>{fmtMoney(printingEntry.entry.otherDeduction)}</td></tr>
+              )}
+              <tr style={{ background: "#101A2E" }}><td className="border px-3 py-2 font-extrabold text-white" style={{ borderColor: "#101A2E" }}>الصافي المستحق</td><td className="border px-3 py-2 font-extrabold tabular-nums text-left text-white" style={{ borderColor: "#101A2E" }}>{fmtMoney(printingEntry.entry.amount)}</td></tr>
+            </tbody>
+          </table>
+          <div className="grid grid-cols-4 gap-6 mt-10 pt-4">
+            {["محاسب القسم", "مدير قسم المقاولات", "المدير التنفيذي", "رئيس مجلس الإدارة"].map((s) => (
+              <div key={s} className="text-center">
+                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>{s}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
