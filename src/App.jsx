@@ -2281,15 +2281,14 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
   const PURPLE = "#6C4FE0";
   const DONUT_COLORS = ["#6C4FE0", "#A594F0", "#C69A3C", "#5B7A9E"];
 
-  // إجمالي العهد = إجمالي التحويلات بس (مش المتاح اللي بيتضمن "عهدة مرحلة" — لأن المرحلة أصلاً جزء
-  // من تحويلات الفترة اللي فاتت، وضمها تاني بتبقى حسبة مزدوجة لنفس الفلوس)
-  const overallTotals = custodies.reduce((acc, c) => {
-    const t = custodyTotals[c.id] || { spent: 0 };
-    acc.transfersIn += Number(c.transfersIn) || 0;
-    acc.spent += t.spent;
-    return acc;
-  }, { transfersIn: 0, spent: 0 });
-  overallTotals.remaining = overallTotals.transfersIn - overallTotals.spent;
+  // إجمالي العهد = "عهدة مرحلة" أول عهدة مسجّلة لكل جهة (فلوس حقيقية جديدة مش متضمنة في أي تحويل)
+  // + إجمالي كل التحويلات بعد كده. من غير كده كنا بنضيع أول رصيد افتتاحي (زي -17,046 أو 7,111)
+  // لأنه مش ناتج عن تحويل مسجّل في النظام.
+  const oldestBroughtForward = (list) => {
+    if (list.length === 0) return 0;
+    const sorted = [...list].sort((a, b) => (a.periodFrom || "").localeCompare(b.periodFrom || ""));
+    return Number(sorted[0].broughtForward) || 0;
+  };
 
   const bySourceTotals = SOURCES.map((s) => {
     const list = custodies.filter((c) => c.source === s);
@@ -2299,9 +2298,15 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
       acc.spent += ct.spent;
       return acc;
     }, { transfersIn: 0, spent: 0 });
-    t.remaining = t.transfersIn - t.spent;
+    const opening = oldestBroughtForward(list);
+    t.transfersInTotal = t.transfersIn + opening; // إجمالي العهد المعروض = الافتتاحي + كل التحويلات
+    t.remaining = opening + t.transfersIn - t.spent;
     return { source: s, ...t };
   });
+  const overallTotals = bySourceTotals.reduce((acc, r) => {
+    acc.transfersInTotal += r.transfersInTotal; acc.spent += r.spent; acc.remaining += r.remaining;
+    return acc;
+  }, { transfersInTotal: 0, spent: 0, remaining: 0 });
   const spentDonut = bySourceTotals.map((r) => ({ name: r.source, value: r.spent })).filter((d) => d.value > 0);
 
   return (
@@ -2324,7 +2329,7 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
               <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي العهد (التحويلات)</div>
-              <div className="text-base font-extrabold tabular-nums">{fmtMoney(overallTotals.transfersIn)}</div>
+              <div className="text-base font-extrabold tabular-nums">{fmtMoney(overallTotals.transfersInTotal)}</div>
             </div>
             <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
               <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المصروف</div>
@@ -2341,7 +2346,7 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
               <div key={r.source} className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
                 <div className="font-bold text-xs mb-1.5">{r.source}</div>
                 <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-                  <div><div style={{ color: COLORS.slate }}>إجمالي العهد</div><div className="font-extrabold tabular-nums">{fmtMoney(r.transfersIn)}</div></div>
+                  <div><div style={{ color: COLORS.slate }}>إجمالي العهد</div><div className="font-extrabold tabular-nums">{fmtMoney(r.transfersInTotal)}</div></div>
                   <div><div style={{ color: COLORS.slate }}>المصروف</div><div className="font-extrabold tabular-nums">{fmtMoney(r.spent)}</div></div>
                   <div><div style={{ color: COLORS.slate }}>المتبقي</div><div className="font-extrabold tabular-nums" style={{ color: r.remaining >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.remaining)}</div></div>
                 </div>
@@ -2467,14 +2472,40 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
       <div className="print-only-area" id="print-area">
         <PrintLetterhead />
         <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>كشف العهد</h2>
+
+        <table style={{ marginBottom: 16 }}>
+          <thead><tr>{["الجهة", "إجمالي التحويلات", "مرحل من الفترة السابقة", "إجمالي العهد", "المصروفات", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>
+            {bySourceTotals.map((r) => (
+              <tr key={r.source}>
+                <td>{r.source}</td>
+                <td>{fmtMoney(r.transfersIn)}</td>
+                <td>{fmtMoney(oldestBroughtForward(custodies.filter((c) => c.source === r.source)))}</td>
+                <td>{fmtMoney(r.transfersInTotal)}</td>
+                <td>{fmtMoney(r.spent)}</td>
+                <td>{fmtMoney(r.remaining)}</td>
+              </tr>
+            ))}
+            <tr style={{ fontWeight: "bold" }}>
+              <td>الإجمالي</td>
+              <td>{fmtMoney(bySourceTotals.reduce((s, r) => s + r.transfersIn, 0))}</td>
+              <td>{fmtMoney(bySourceTotals.reduce((s, r) => s + oldestBroughtForward(custodies.filter((c) => c.source === r.source)), 0))}</td>
+              <td>{fmtMoney(overallTotals.transfersInTotal)}</td>
+              <td>{fmtMoney(overallTotals.spent)}</td>
+              <td>{fmtMoney(overallTotals.remaining)}</td>
+            </tr>
+          </tbody>
+        </table>
+
         <table>
-          <thead><tr>{["العهدة", "الجهة", "الفترة", "متاح", "مصروف", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <thead><tr>{["العهدة", "الجهة", "الفترة", "مرحل من الفترة السابقة", "إجمالي التحويلات", "إجمالي المتاح", "المصروفات", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>
             {custodies.map((c) => {
               const t = custodyTotals[c.id] || { spent: 0, available: 0, remaining: 0 };
               return (
                 <tr key={c.id}>
                   <td>{c.label}</td><td>{c.source}</td><td>{c.periodFrom}{c.periodTo ? ` → ${c.periodTo}` : ""}</td>
+                  <td>{fmtMoney(c.broughtForward)}</td><td>{fmtMoney(c.transfersIn)}</td>
                   <td>{fmtMoney(t.available)}</td><td>{fmtMoney(t.spent)}</td><td>{fmtMoney(t.remaining)}</td>
                 </tr>
               );
