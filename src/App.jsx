@@ -2733,6 +2733,10 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
   const [dateTo, setDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(30);
+  const PURPLE = "#6C4FE0";
+  const PURPLE_SOFT = "#F1EDFC";
   const custodyLabel = (id) => custodies.find((c) => c.id === id)?.label || "—";
 
   const codeMap = useMemo(() => {
@@ -2761,6 +2765,32 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
   }, [expenses, q, catFilter, srcFilter, dateFrom, dateTo, custodies]);
 
   const rowsTotal = rows.reduce((s, e) => s + (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0), 0);
+
+  // ملخصات لكروت الداشبورد فوق (زي أسلوب أوكتين) — بتتحسب من نفس نتائج البحث/الفلترة الحالية
+  const byCategoryDonut = useMemo(() => {
+    const map = {};
+    rows.forEach((e) => {
+      const t = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+      map[e.category] = (map[e.category] || 0) + t;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value })).filter((d) => d.value > 0);
+  }, [rows]);
+  const bySourceDonut = useMemo(() => {
+    const map = {};
+    rows.forEach((e) => {
+      const t = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
+      map[e.source] = (map[e.source] || 0) + t;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value })).filter((d) => d.value > 0);
+  }, [rows]);
+  const DONUT_COLORS = ["#6C4FE0", "#A594F0", "#C69A3C", "#5B7A9E", "#8B9C6E", "#B5453A"];
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const pagedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [rows, page, pageSize]);
+  useEffect(() => { setPage(1); }, [q, catFilter, srcFilter, dateFrom, dateTo, pageSize]);
 
   const saveEdit = (e) => {
     e.preventDefault();
@@ -2804,10 +2834,51 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
         sub={`${expenses.length} بند صرف مسجل`}
         action={
           <div className="no-print flex flex-wrap gap-2">
-            <ExportButtons onExcel={handleExcelExport} onPdf={handlePrint} />
+            <button onClick={handleExcelExport} className="px-5 py-2.5 rounded-full text-sm font-bold text-white flex items-center gap-2" style={{ background: PURPLE }}>
+              <UploadCloud size={16} /> تصدير البيانات
+            </button>
+            <button onClick={handlePrint} className="px-4 py-2.5 rounded-full text-sm font-bold border flex items-center gap-2" style={{ borderColor: COLORS.border, color: COLORS.ink, background: "white" }}>
+              <Printer size={16} /> طباعة
+            </button>
           </div>
         }
       />
+
+      <div className="no-print grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="p-4 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>عدد البنود</div>
+          <div className="text-lg font-extrabold tabular-nums">{fmtNum(rows.length)}</div>
+        </div>
+        <div className="p-4 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>الإجمالي</div>
+          <div className="text-lg font-extrabold tabular-nums">{fmtMoney(rowsTotal)}</div>
+        </div>
+        <div className="col-span-2 md:col-span-3 p-3 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+          <div className="flex items-center gap-4">
+            <div style={{ width: 90, height: 90 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={byCategoryDonut} dataKey="value" nameKey="name" innerRadius={26} outerRadius={40} paddingAngle={2}>
+                    {byCategoryDonut.map((d, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex-1 text-xs space-y-1">
+              <div className="font-bold mb-1" style={{ color: COLORS.ink }}>توزيع حسب التصنيف</div>
+              {byCategoryDonut.slice(0, 3).map((d, i) => (
+                <div key={d.name} className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 truncate" style={{ color: COLORS.slate }}>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
+                    {d.name}
+                  </span>
+                  <span className="font-bold shrink-0">{fmtMoney(d.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {editing && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
@@ -2848,10 +2919,16 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
       <SectionCard>
         <div className="flex gap-2 mb-4">
           <div className="relative flex-1">
-            <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
-            <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالكود، الموقع، الغرض من الصرف..." className="pr-9" />
+            <Search size={16} className="absolute right-4 top-1/2 -translate-y-1/2" style={{ color: COLORS.slateLight }} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="ابحث بالكود، الموقع، الغرض من الصرف..."
+              className="w-full pr-11 pl-4 py-3 rounded-full text-sm outline-none"
+              style={{ border: `1px solid ${COLORS.border}`, background: "white" }}
+            />
           </div>
-          <button onClick={() => setShowFilters((s) => !s)} className="px-4 rounded-lg border flex items-center gap-2 text-sm font-semibold shrink-0" style={{ borderColor: COLORS.border, color: showFilters ? COLORS.gold : COLORS.slate }}>
+          <button onClick={() => setShowFilters((s) => !s)} className="px-4 rounded-full border flex items-center gap-2 text-sm font-semibold shrink-0" style={{ borderColor: showFilters ? PURPLE : COLORS.border, color: showFilters ? PURPLE : COLORS.slate, background: showFilters ? PURPLE_SOFT : "white" }}>
             <Filter size={15} /> فلاتر
           </button>
         </div>
@@ -2898,7 +2975,7 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
                 </tr>
               </thead>
               <tbody>
-                {rows.map((e) => {
+                {pagedRows.map((e) => {
                   const total = (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0);
                   return (
                     <tr key={e.id} className="border-t hover:bg-gray-50" style={{ borderColor: COLORS.border }}>
@@ -2930,6 +3007,22 @@ function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate 
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {rows.length > 0 && (
+          <div className="no-print flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+            <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: COLORS.slate }}>
+              عدد الصفوف في الصفحة
+              <Select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className="w-20">
+                {[10, 30, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+              </Select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded-md border disabled:opacity-40" style={{ borderColor: COLORS.border }}>‹</button>
+              <span className="text-xs font-bold px-2" style={{ color: COLORS.ink }}>صفحة {fmtNum(page)} من {fmtNum(totalPages)}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1.5 rounded-md border disabled:opacity-40" style={{ borderColor: COLORS.border }}>›</button>
+            </div>
           </div>
         )}
       </SectionCard>
