@@ -2299,15 +2299,20 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
       return acc;
     }, { transfersIn: 0, spent: 0 });
     const opening = oldestBroughtForward(list);
-    t.transfersInTotal = t.transfersIn + opening; // إجمالي العهد المعروض = الافتتاحي + كل التحويلات
+    t.opening = opening;
+    t.transfersInTotal = t.transfersIn + opening; // المتاح = الافتتاحي + كل التحويلات
     t.remaining = opening + t.transfersIn - t.spent;
     return { source: s, ...t };
   });
   const overallTotals = bySourceTotals.reduce((acc, r) => {
-    acc.transfersInTotal += r.transfersInTotal; acc.spent += r.spent; acc.remaining += r.remaining;
+    acc.transfersIn += r.transfersIn; acc.opening += r.opening; acc.transfersInTotal += r.transfersInTotal; acc.spent += r.spent; acc.remaining += r.remaining;
     return acc;
-  }, { transfersInTotal: 0, spent: 0, remaining: 0 });
+  }, { transfersIn: 0, opening: 0, transfersInTotal: 0, spent: 0, remaining: 0 });
   const spentDonut = bySourceTotals.map((r) => ({ name: r.source, value: r.spent })).filter((d) => d.value > 0);
+
+  const [printScope, setPrintScope] = useState("الكل"); // الكل | اسم شركة بعينها
+  const printCustodies = printScope === "الكل" ? custodies : custodies.filter((c) => c.source === printScope);
+  const printSourceTotals = printScope === "الكل" ? bySourceTotals : bySourceTotals.filter((r) => r.source === printScope);
 
   return (
     <div className="space-y-6">
@@ -2316,6 +2321,10 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
         sub="إدارة عهد الصرف الخاصة بكل جهة"
         action={
           <div className="flex flex-wrap gap-2">
+            <Select value={printScope} onChange={(e) => setPrintScope(e.target.value)} className="no-print w-44">
+              <option value="الكل">اطبع: كل الشركات</option>
+              {SOURCES.map((s) => <option key={s} value={s}>اطبع: {s} بس</option>)}
+            </Select>
             <ExportButtons onExcel={handleExcelExport} onPdf={handlePdfExport} />
             <button onClick={() => (showForm ? cancel() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
               {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "عهدة جديدة"}
@@ -2326,16 +2335,24 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
 
       {custodies.length > 0 && (
         <div className="no-print space-y-2">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
-              <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي العهد (التحويلات)</div>
+              <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي التحويلات الواردة</div>
+              <div className="text-base font-extrabold tabular-nums">{fmtMoney(overallTotals.transfersIn)}</div>
+            </div>
+            <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+              <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>عهدة مرحلة من الفترة السابقة</div>
+              <div className="text-base font-extrabold tabular-nums" style={{ color: overallTotals.opening < 0 ? COLORS.danger : COLORS.ink }}>{fmtMoney(overallTotals.opening)}</div>
+            </div>
+            <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+              <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>المتاح</div>
               <div className="text-base font-extrabold tabular-nums">{fmtMoney(overallTotals.transfersInTotal)}</div>
             </div>
             <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
               <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المصروف</div>
               <div className="text-base font-extrabold tabular-nums">{fmtMoney(overallTotals.spent)}</div>
             </div>
-            <div className="col-span-2 p-3 rounded-xl" style={{ background: PURPLE }}>
+            <div className="p-3 rounded-xl" style={{ background: PURPLE }}>
               <div className="text-[11px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>المتبقي</div>
               <div className="text-base font-extrabold tabular-nums text-white">{fmtMoney(overallTotals.remaining)}</div>
             </div>
@@ -2345,8 +2362,10 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
             {bySourceTotals.map((r) => (
               <div key={r.source} className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
                 <div className="font-bold text-xs mb-1.5">{r.source}</div>
-                <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-                  <div><div style={{ color: COLORS.slate }}>إجمالي العهد</div><div className="font-extrabold tabular-nums">{fmtMoney(r.transfersInTotal)}</div></div>
+                <div className="grid grid-cols-5 gap-1.5 text-[11px]">
+                  <div><div style={{ color: COLORS.slate }}>التحويلات</div><div className="font-extrabold tabular-nums">{fmtMoney(r.transfersIn)}</div></div>
+                  <div><div style={{ color: COLORS.slate }}>مرحل سابق</div><div className="font-extrabold tabular-nums" style={{ color: r.opening < 0 ? COLORS.danger : COLORS.ink }}>{fmtMoney(r.opening)}</div></div>
+                  <div><div style={{ color: COLORS.slate }}>المتاح</div><div className="font-extrabold tabular-nums">{fmtMoney(r.transfersInTotal)}</div></div>
                   <div><div style={{ color: COLORS.slate }}>المصروف</div><div className="font-extrabold tabular-nums">{fmtMoney(r.spent)}</div></div>
                   <div><div style={{ color: COLORS.slate }}>المتبقي</div><div className="font-extrabold tabular-nums" style={{ color: r.remaining >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.remaining)}</div></div>
                 </div>
@@ -2471,42 +2490,44 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
 
       <div className="print-only-area" id="print-area">
         <PrintLetterhead />
-        <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>كشف العهد</h2>
+        <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>كشف العهد{printScope !== "الكل" ? ` — ${printScope}` : ""}</h2>
 
-        <table style={{ marginBottom: 16 }}>
-          <thead><tr>{["الجهة", "إجمالي التحويلات", "مرحل من الفترة السابقة", "إجمالي العهد", "المصروفات", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+        <table style={{ marginBottom: 16, tableLayout: "auto" }}>
+          <thead><tr>{["الجهة", "إجمالي التحويلات", "مرحل من الفترة السابقة", "المتاح", "المصروفات", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>
-            {bySourceTotals.map((r) => (
+            {printSourceTotals.map((r) => (
               <tr key={r.source}>
                 <td>{r.source}</td>
-                <td>{fmtMoney(r.transfersIn)}</td>
-                <td>{fmtMoney(oldestBroughtForward(custodies.filter((c) => c.source === r.source)))}</td>
-                <td>{fmtMoney(r.transfersInTotal)}</td>
-                <td>{fmtMoney(r.spent)}</td>
-                <td>{fmtMoney(r.remaining)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(r.transfersIn)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(r.opening)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(r.transfersInTotal)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(r.spent)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(r.remaining)}</td>
               </tr>
             ))}
-            <tr style={{ fontWeight: "bold" }}>
-              <td>الإجمالي</td>
-              <td>{fmtMoney(bySourceTotals.reduce((s, r) => s + r.transfersIn, 0))}</td>
-              <td>{fmtMoney(bySourceTotals.reduce((s, r) => s + oldestBroughtForward(custodies.filter((c) => c.source === r.source)), 0))}</td>
-              <td>{fmtMoney(overallTotals.transfersInTotal)}</td>
-              <td>{fmtMoney(overallTotals.spent)}</td>
-              <td>{fmtMoney(overallTotals.remaining)}</td>
-            </tr>
+            {printSourceTotals.length > 1 && (
+              <tr style={{ fontWeight: "bold" }}>
+                <td>الإجمالي</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(printSourceTotals.reduce((s, r) => s + r.transfersIn, 0))}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(printSourceTotals.reduce((s, r) => s + r.opening, 0))}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(printSourceTotals.reduce((s, r) => s + r.transfersInTotal, 0))}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(printSourceTotals.reduce((s, r) => s + r.spent, 0))}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(printSourceTotals.reduce((s, r) => s + r.remaining, 0))}</td>
+              </tr>
+            )}
           </tbody>
         </table>
 
-        <table>
+        <table style={{ tableLayout: "auto" }}>
           <thead><tr>{["العهدة", "الجهة", "الفترة", "مرحل من الفترة السابقة", "إجمالي التحويلات", "إجمالي المتاح", "المصروفات", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>
-            {custodies.map((c) => {
+            {printCustodies.map((c) => {
               const t = custodyTotals[c.id] || { spent: 0, available: 0, remaining: 0 };
               return (
                 <tr key={c.id}>
-                  <td>{c.label}</td><td>{c.source}</td><td>{c.periodFrom}{c.periodTo ? ` → ${c.periodTo}` : ""}</td>
-                  <td>{fmtMoney(c.broughtForward)}</td><td>{fmtMoney(c.transfersIn)}</td>
-                  <td>{fmtMoney(t.available)}</td><td>{fmtMoney(t.spent)}</td><td>{fmtMoney(t.remaining)}</td>
+                  <td>{c.label}</td><td style={{ whiteSpace: "nowrap" }}>{c.source}</td><td style={{ whiteSpace: "nowrap" }}>{c.periodFrom}{c.periodTo ? ` → ${c.periodTo}` : ""}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(c.broughtForward)}</td><td style={{ whiteSpace: "nowrap" }}>{fmtMoney(c.transfersIn)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{fmtMoney(t.available)}</td><td style={{ whiteSpace: "nowrap" }}>{fmtMoney(t.spent)}</td><td style={{ whiteSpace: "nowrap" }}>{fmtMoney(t.remaining)}</td>
                 </tr>
               );
             })}
