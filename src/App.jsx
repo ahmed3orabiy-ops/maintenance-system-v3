@@ -2278,6 +2278,26 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
     cancel();
   };
 
+  const PURPLE = "#6C4FE0";
+  const DONUT_COLORS = ["#6C4FE0", "#A594F0", "#C69A3C", "#5B7A9E"];
+
+  const overallTotals = custodies.reduce((acc, c) => {
+    const t = custodyTotals[c.id] || { available: 0, spent: 0, remaining: 0 };
+    acc.available += t.available; acc.spent += t.spent; acc.remaining += t.remaining;
+    return acc;
+  }, { available: 0, spent: 0, remaining: 0 });
+
+  const bySourceTotals = SOURCES.map((s) => {
+    const list = custodies.filter((c) => c.source === s);
+    const t = list.reduce((acc, c) => {
+      const ct = custodyTotals[c.id] || { available: 0, spent: 0, remaining: 0 };
+      acc.available += ct.available; acc.spent += ct.spent; acc.remaining += ct.remaining;
+      return acc;
+    }, { available: 0, spent: 0, remaining: 0 });
+    return { source: s, ...t };
+  });
+  const spentDonut = bySourceTotals.map((r) => ({ name: r.source, value: r.spent })).filter((d) => d.value > 0);
+
   return (
     <div className="space-y-6">
       <Header
@@ -2292,6 +2312,60 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
           </div>
         }
       />
+
+      {custodies.length > 0 && (
+        <div className="no-print space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+              <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي العهد</div>
+              <div className="text-lg font-extrabold tabular-nums">{fmtMoney(overallTotals.available)}</div>
+            </div>
+            <div className="p-4 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+              <div className="text-xs font-bold mb-1" style={{ color: COLORS.slate }}>إجمالي المصروف</div>
+              <div className="text-lg font-extrabold tabular-nums">{fmtMoney(overallTotals.spent)}</div>
+            </div>
+            <div className="col-span-2 p-4 rounded-2xl" style={{ background: PURPLE }}>
+              <div className="text-xs font-bold mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>المتبقي</div>
+              <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(overallTotals.remaining)}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {bySourceTotals.map((r) => (
+              <div key={r.source} className="p-4 rounded-2xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+                <div className="font-bold text-sm mb-2">{r.source}</div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div><div style={{ color: COLORS.slate }}>إجمالي العهد</div><div className="font-extrabold tabular-nums">{fmtMoney(r.available)}</div></div>
+                  <div><div style={{ color: COLORS.slate }}>المصروف</div><div className="font-extrabold tabular-nums">{fmtMoney(r.spent)}</div></div>
+                  <div><div style={{ color: COLORS.slate }}>المتبقي</div><div className="font-extrabold tabular-nums" style={{ color: r.remaining >= 0 ? "#1B5E20" : COLORS.danger }}>{fmtMoney(r.remaining)}</div></div>
+                </div>
+              </div>
+            ))}
+            {spentDonut.length > 0 && (
+              <div className="p-3 rounded-2xl flex items-center gap-4" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+                <div style={{ width: 80, height: 80 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={spentDonut} dataKey="value" nameKey="name" innerRadius={22} outerRadius={36} paddingAngle={2}>
+                        {spentDonut.map((d, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="text-xs space-y-1">
+                  <div className="font-bold mb-1">توزيع المصروف حسب الجهة</div>
+                  {spentDonut.map((d, i) => (
+                    <div key={d.name} className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
+                      <span style={{ color: COLORS.slate }}>{d.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
