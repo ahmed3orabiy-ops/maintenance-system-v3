@@ -1463,7 +1463,6 @@ export default function App() {
       group: "المالية",
       items: [
         { key: "custodies", label: "العهد", icon: ClipboardList },
-        { key: "subCustodies", label: "عهد فرعية", icon: Wallet },
         { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
         { key: "database", label: "قاعدة البيانات", icon: Database },
         { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
@@ -1757,7 +1756,6 @@ export default function App() {
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
             {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
-            {view === "subCustodies" && <SubCustodiesView subCustodies={subCustodies} clearances={subCustodyClearances} totals={subCustodyTotals} equipmentCodes={equipmentCodes} onAddSub={addSubCustody} onUpdateSub={updateSubCustody} onDeleteSub={deleteSubCustody} onAddClearance={addSubCustodyClearance} onUpdateClearance={updateSubCustodyClearance} onDeleteClearance={deleteSubCustodyClearance} />}
             {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
             {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
             {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
@@ -2541,479 +2539,6 @@ function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
 /* ============================================================
    قاعدة البيانات
 ============================================================ */
-/* ============================================================
-   عهد فرعية (مشرفين الصيانة) — عهدة نقدية شخصية بتتصفّى تدريجيًا
-============================================================ */
-/* ============================================================
-   عهد فرعية — عهدة نقدية بتتصرف على بنود زي بند صرف عادي، وبتتصفّى تدريجيًا
-   مستقلة تمامًا عن حسابات التكلفة والربحية
-============================================================ */
-function SubCustodiesView({ subCustodies, clearances, totals, equipmentCodes, onAddSub, onUpdateSub, onDeleteSub, onAddClearance, onUpdateClearance, onDeleteClearance }) {
-  const [mode, setMode] = useState("register"); // register | clear
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [q, setQ] = useState("");
-  const emptySub = { supervisorName: "", date: todayISO(), amountGiven: "", notes: "" };
-  const [form, setForm] = useState(emptySub);
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const [selectedId, setSelectedId] = useState("");
-  const emptyClearance = {
-    date: todayISO(), category: CATEGORIES[0], equipmentCode: "", equipmentType: "", brand: "", location: "",
-    purpose: "", notes: "", cash: "", transfer: "", check: "",
-  };
-  const [clearanceForm, setClearanceForm] = useState(emptyClearance);
-  const [editingClearanceId, setEditingClearanceId] = useState(null);
-  const csetC = (k) => (e) => setClearanceForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const codeMap = useMemo(() => {
-    const map = {};
-    (equipmentCodes || []).forEach((c) => {
-      if (isCostPoolCode(c.code)) return;
-      map[normCode(c.code)] = { display: String(c.code || ""), type: c.type, brand: c.brand, location: c.location };
-    });
-    return map;
-  }, [equipmentCodes]);
-  const codeOptions = useMemo(() => Object.values(codeMap).sort((a, b) => a.display.localeCompare(b.display)), [codeMap]);
-  const handleClearanceCodeChange = (e) => {
-    const code = e.target.value;
-    const known = codeMap[normCode(code)];
-    setClearanceForm((f) => ({
-      ...f, equipmentCode: code,
-      equipmentType: known ? known.type : f.equipmentType,
-      brand: known ? known.brand : f.brand,
-      location: known && known.location ? known.location : f.location,
-    }));
-  };
-
-  const startAdd = () => { setEditingId(null); setForm(emptySub); setShowForm(true); };
-  const startEdit = (c) => {
-    setEditingId(c.id);
-    setForm({ supervisorName: c.supervisorName || "", date: c.date || todayISO(), amountGiven: c.amountGiven ?? "", notes: c.notes || "" });
-    setShowForm(true);
-  };
-  const cancelForm = () => { setShowForm(false); setEditingId(null); setForm(emptySub); };
-
-  const submitSub = (e) => {
-    e.preventDefault();
-    if (editingId) onUpdateSub(editingId, form);
-    else onAddSub(form);
-    cancelForm();
-  };
-
-  const startClearanceEdit = (c) => {
-    setEditingClearanceId(c.id);
-    setClearanceForm({
-      date: c.date || todayISO(), category: c.category || CATEGORIES[0], equipmentCode: c.equipmentCode || "",
-      equipmentType: c.equipmentType || "", brand: c.brand || "", location: c.location || "",
-      purpose: c.purpose || c.description || "", notes: c.notes || "",
-      cash: c.cash ?? "", transfer: c.transfer ?? "", check: c.check ?? "",
-    });
-  };
-  const cancelClearanceForm = () => { setEditingClearanceId(null); setClearanceForm(emptyClearance); };
-
-  const clearanceTotalPreview = (Number(clearanceForm.cash) || 0) + (Number(clearanceForm.transfer) || 0) + (Number(clearanceForm.check) || 0);
-
-  const submitClearance = (e) => {
-    e.preventDefault();
-    const amount = (Number(clearanceForm.cash) || 0) + (Number(clearanceForm.transfer) || 0) + (Number(clearanceForm.check) || 0);
-    const payload = { ...clearanceForm, amount, description: clearanceForm.purpose };
-    if (editingClearanceId) onUpdateClearance(editingClearanceId, payload);
-    else onAddClearance({ ...payload, subCustodyId: selectedId });
-    cancelClearanceForm();
-  };
-
-  const term = q.trim().toLowerCase();
-  const filtered = useMemo(
-    () =>
-      [...subCustodies]
-        .filter((c) => !term || [c.supervisorName, c.notes].join(" ").toLowerCase().includes(term))
-        .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
-    [subCustodies, term]
-  );
-
-  const grand = filtered.reduce((acc, c) => {
-    const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
-    return { given: acc.given + t.given, cleared: acc.cleared + t.cleared, remaining: acc.remaining + t.remaining };
-  }, { given: 0, cleared: 0, remaining: 0 });
-
-  const selectedCustody = subCustodies.find((c) => c.id === selectedId) || null;
-  const selectedTotals = selectedId ? (totals[selectedId] || { given: 0, cleared: 0, remaining: 0 }) : null;
-  const selectedItems = selectedId ? clearances.filter((x) => x.subCustodyId === selectedId).sort((a, b) => (b.date || "").localeCompare(a.date || "")) : [];
-
-  /* ============ الطباعة — نفس شكل "طباعة عهدة" بالظبط، مع خيار تحديد اللي هيتطبع ============ */
-  const [printMode, setPrintMode] = useState("clearance"); // clearance | grant | all
-  const [printSupervisorId, setPrintSupervisorId] = useState("");
-  const handlePrint = () => window.print();
-
-  const mergeKey = (code) => (code ? looseKey(normCode(code)) : "");
-  const sortForMerge = (rows) => {
-    const withIdx = rows.map((r, i) => ({ r, i, key: mergeKey(r.equipmentCode) }));
-    const firstIndex = {};
-    withIdx.forEach(({ key, i }) => { if (key && !(key in firstIndex)) firstIndex[key] = i; });
-    withIdx.sort((a, b) => {
-      const oa = a.key ? firstIndex[a.key] : a.i;
-      const ob = b.key ? firstIndex[b.key] : b.i;
-      if (oa !== ob) return oa - ob;
-      return a.i - b.i;
-    });
-    return withIdx.map((x) => x.r);
-  };
-  const withMergeInfo = (rows) => rows.map((row, i) => {
-    const key = mergeKey(row.equipmentCode);
-    const prevKey = i > 0 ? mergeKey(rows[i - 1].equipmentCode) : "";
-    const isNewGroup = i === 0 || !key || prevKey !== key;
-    let span = 1;
-    if (isNewGroup && key) {
-      for (let j = i + 1; j < rows.length && mergeKey(rows[j].equipmentCode) === key; j++) span++;
-    }
-    return { ...row, _mergeStart: isNewGroup, _mergeSpan: span };
-  });
-
-  // العهد اللي هتتطبع فعليًا حسب الاختيار (مشرف بعينه أو الكل)
-  const printSubCustodies = printSupervisorId ? subCustodies.filter((c) => c.id === printSupervisorId) : subCustodies;
-
-  return (
-    <div className="space-y-6">
-      <Header
-        title="عهد فرعية"
-        sub="مستقلة تمامًا عن حسابات التكلفة والربحية — بس لمتابعة العهدة النقدية الشخصية لكل مشرف"
-        action={
-          <div className="no-print flex flex-wrap items-end gap-2">
-            <Select value={printMode} onChange={(e) => setPrintMode(e.target.value)} className="w-48">
-              <option value="clearance">اطبع: تصفية عهدة</option>
-              <option value="grant">اطبع: عهدة مشرف</option>
-              <option value="all">اطبع: الكل</option>
-            </Select>
-            <Select value={printSupervisorId} onChange={(e) => setPrintSupervisorId(e.target.value)} className="w-52">
-              <option value="">كل المشرفين</option>
-              {subCustodies.map((c) => <option key={c.id} value={c.id}>{c.supervisorName} — {c.date}</option>)}
-            </Select>
-            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-              <Printer size={16} /> طباعة
-            </button>
-          </div>
-        }
-      />
-
-      <div className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <KPICard label="إجمالي العهدة الفرعية" value={fmtMoney(grand.given)} icon={Wallet} />
-        <KPICard label="إجمالي المصروفات" value={fmtMoney(grand.cleared)} tone="gold" icon={Wallet} />
-        <KPICard label="المتبقي" value={fmtMoney(grand.remaining)} tone="gold" icon={Wallet} />
-      </div>
-
-      <div className="no-print flex gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
-        <button
-          onClick={() => setMode("register")}
-          className="px-5 py-2 rounded-lg text-sm font-bold transition"
-          style={{ background: mode === "register" ? COLORS.navy : "transparent", color: mode === "register" ? "white" : COLORS.slate }}
-        >
-          تسجيل عهدة جديدة
-        </button>
-        <button
-          onClick={() => setMode("clear")}
-          className="px-5 py-2 rounded-lg text-sm font-bold transition"
-          style={{ background: mode === "clear" ? COLORS.navy : "transparent", color: mode === "clear" ? "white" : COLORS.slate }}
-        >
-          تصفية عهدة
-        </button>
-      </div>
-
-      <div className="no-print">
-        {mode === "register" && (
-          <>
-            <div className="flex justify-end">
-              <button onClick={() => (showForm ? cancelForm() : startAdd())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
-                {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "عهدة فرعية جديدة"}
-              </button>
-            </div>
-
-            {showForm && (
-              <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-                <form onSubmit={submitSub} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
-                  <div className="flex items-center justify-between mb-5">
-                    <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل عهدة فرعية" : "عهدة فرعية جديدة"}</h3>
-                    <button type="button" onClick={cancelForm} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Field label="الاسم" required><TextInput value={form.supervisorName} onChange={set("supervisorName")} required placeholder="اسم مشرف الصيانة" /></Field>
-                    <Field label="تاريخ المنح" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
-                    <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amountGiven} onChange={set("amountGiven")} required placeholder="0" /></Field>
-                    <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
-                  </div>
-                  <div className="flex justify-end gap-2 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                    <button type="button" onClick={cancelForm} className="px-6 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-                    <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {subCustodies.length === 0 ? (
-              <SectionCard className="mt-6"><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة بعد" /></SectionCard>
-            ) : (
-              <>
-                <div className="mt-6 relative">
-                  <Search size={16} className="absolute top-1/2 -translate-y-1/2 right-3" style={{ color: COLORS.slateLight }} />
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث بالاسم أو الملاحظات..." className="w-full pr-9 pl-3 py-2.5 rounded-lg text-sm border" style={{ borderColor: COLORS.border, background: COLORS.paper }} />
-                </div>
-
-                <SectionCard className="mt-4" title={`العهد المسجّلة (${filtered.length})`}>
-                  <div className="overflow-x-auto -mx-5">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                          {["الاسم", "تاريخ المنح", "المبلغ", "المصروف", "المتبقي", "ملاحظات", ""].map((h) => (
-                            <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map((c) => {
-                          const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
-                          return (
-                            <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                              <td className="px-4 py-2.5 font-semibold whitespace-nowrap">{c.supervisorName}</td>
-                              <td className="px-4 py-2.5 whitespace-nowrap">{c.date}</td>
-                              <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(t.given)}</td>
-                              <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(t.cleared)}</td>
-                              <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap" style={{ color: t.remaining > 0 ? COLORS.danger : COLORS.success }}>{fmtMoney(t.remaining)}</td>
-                              <td className="px-4 py-2.5">{c.notes || "—"}</td>
-                              <td className="px-4 py-2.5">
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                                  <button onClick={() => onDeleteSub(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        {filtered.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-sm" style={{ color: COLORS.slate }}>لا توجد نتائج مطابقة للبحث</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </SectionCard>
-              </>
-            )}
-          </>
-        )}
-
-        {mode === "clear" && (
-          <div className="mt-6 space-y-4">
-            <SectionCard title="اختر المشرف">
-              <Select value={selectedId} onChange={(e) => { setSelectedId(e.target.value); cancelClearanceForm(); }}>
-                <option value="">اختر عهدة فرعية...</option>
-                {subCustodies.map((c) => {
-                  const t = totals[c.id] || { given: 0, cleared: 0, remaining: 0 };
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {c.supervisorName} — {c.date} — الباقي: {fmtMoney(t.remaining)}
-                    </option>
-                  );
-                })}
-              </Select>
-            </SectionCard>
-
-            {selectedCustody && (
-              <>
-                <div className="grid grid-cols-3 gap-4">
-                  <KPICard label="العهدة" value={fmtMoney(selectedTotals.given)} icon={Wallet} />
-                  <KPICard label="المصروف" value={fmtMoney(selectedTotals.cleared)} tone="gold" icon={Wallet} />
-                  <KPICard label="المتبقي" value={fmtMoney(selectedTotals.remaining)} tone="gold" icon={Wallet} />
-                </div>
-
-                {!editingClearanceId && (
-                  <form onSubmit={submitClearance}>
-                    <SectionCard title={`بند صرف جديد — ${selectedCustody.supervisorName}`}>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <Field label="التاريخ" required><TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required /></Field>
-                        <Field label="التصنيف" required><Select value={clearanceForm.category} onChange={csetC("category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</Select></Field>
-                        <Field label="كود المعدة">
-                          <TextInput list="subcustody-codes" value={clearanceForm.equipmentCode} onChange={handleClearanceCodeChange} placeholder="اختياري" />
-                          <datalist id="subcustody-codes">{codeOptions.map((c) => <option key={c.display} value={c.display} />)}</datalist>
-                        </Field>
-                        <Field label="النوع"><TextInput value={clearanceForm.equipmentType} onChange={csetC("equipmentType")} /></Field>
-                        <Field label="الماركة"><TextInput value={clearanceForm.brand} onChange={csetC("brand")} /></Field>
-                        <Field label="الموقع"><TextInput value={clearanceForm.location} onChange={csetC("location")} /></Field>
-                        <div className="md:col-span-3"><Field label="الغرض من الصرف" required><TextInput value={clearanceForm.purpose} onChange={csetC("purpose")} required placeholder="فيم صُرف؟" /></Field></div>
-                        <div className="md:col-span-3"><Field label="ملاحظات"><TextInput value={clearanceForm.notes} onChange={csetC("notes")} placeholder="اختياري" /></Field></div>
-                        <Field label="نقدي"><TextInput type="number" step="0.01" value={clearanceForm.cash} onChange={csetC("cash")} placeholder="0" /></Field>
-                        <Field label="تحويل"><TextInput type="number" step="0.01" value={clearanceForm.transfer} onChange={csetC("transfer")} placeholder="0" /></Field>
-                        <Field label="شيك"><TextInput type="number" step="0.01" value={clearanceForm.check} onChange={csetC("check")} placeholder="0" /></Field>
-                      </div>
-                      <div className="flex items-center justify-between mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                        <div className="text-sm font-bold" style={{ color: COLORS.ink }}>الإجمالي: {fmtMoney(clearanceTotalPreview)}</div>
-                        <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>إضافة البند</button>
-                      </div>
-                    </SectionCard>
-                  </form>
-                )}
-
-                {editingClearanceId && (
-                  <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-                    <form onSubmit={submitClearance} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>تعديل بند صرف</h3>
-                        <button type="button" onClick={cancelClearanceForm} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <Field label="التاريخ" required><TextInput type="date" value={clearanceForm.date} onChange={csetC("date")} required /></Field>
-                        <Field label="التصنيف" required><Select value={clearanceForm.category} onChange={csetC("category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</Select></Field>
-                        <Field label="كود المعدة"><TextInput value={clearanceForm.equipmentCode} onChange={handleClearanceCodeChange} placeholder="اختياري" /></Field>
-                        <Field label="النوع"><TextInput value={clearanceForm.equipmentType} onChange={csetC("equipmentType")} /></Field>
-                        <Field label="الماركة"><TextInput value={clearanceForm.brand} onChange={csetC("brand")} /></Field>
-                        <Field label="الموقع"><TextInput value={clearanceForm.location} onChange={csetC("location")} /></Field>
-                        <div className="md:col-span-3"><Field label="الغرض من الصرف" required><TextInput value={clearanceForm.purpose} onChange={csetC("purpose")} required /></Field></div>
-                        <Field label="نقدي"><TextInput type="number" step="0.01" value={clearanceForm.cash} onChange={csetC("cash")} placeholder="0" /></Field>
-                        <Field label="تحويل"><TextInput type="number" step="0.01" value={clearanceForm.transfer} onChange={csetC("transfer")} placeholder="0" /></Field>
-                        <Field label="شيك"><TextInput type="number" step="0.01" value={clearanceForm.check} onChange={csetC("check")} placeholder="0" /></Field>
-                      </div>
-                      <div className="flex justify-end gap-2 mt-4 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-                        <button type="button" onClick={cancelClearanceForm} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-                        <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ التعديل</button>
-                      </div>
-                    </form>
-                  </div>
-                )}
-
-                <SectionCard title={`بنود الصرف (${selectedItems.length})`}>
-                  {selectedItems.length === 0 ? (
-                    <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لسه مفيش بنود مسجّلة</div>
-                  ) : (
-                    <div className="overflow-x-auto -mx-5">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                            {["التاريخ", "التصنيف", "كود المعدة", "الغرض من الصرف", "المبلغ", ""].map((h) => (
-                              <th key={h} className="px-4 py-2.5 text-right text-xs font-bold" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedItems.map((x) => (
-                            <tr key={x.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                              <td className="px-4 py-2.5 whitespace-nowrap">{x.date}</td>
-                              <td className="px-4 py-2.5 whitespace-nowrap">{x.category || "—"}</td>
-                              <td className="px-4 py-2.5 whitespace-nowrap">{x.equipmentCode || "—"}</td>
-                              <td className="px-4 py-2.5">{x.purpose || x.description}</td>
-                              <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(x.amount)}</td>
-                              <td className="px-4 py-2.5">
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => startClearanceEdit(x)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button>
-                                  <button onClick={() => onDeleteClearance(x.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </SectionCard>
-              </>
-            )}
-
-            {!selectedCustody && subCustodies.length === 0 && (
-              <SectionCard><EmptyState icon={Wallet} title="لا توجد عهد فرعية مسجّلة — سجّل عهدة جديدة أول من تاب (تسجيل عهدة جديدة)" /></SectionCard>
-            )}
-            {!selectedCustody && subCustodies.length > 0 && (
-              <div className="text-sm text-center py-8 flex flex-col items-center gap-2" style={{ color: COLORS.slate }}>
-                <Wallet size={28} style={{ color: COLORS.slateLight }} />
-                اختر مشرف من القائمة فوق عشان يظهرلك فورم تسجيل بند الصرف
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ============ منطقة الطباعة — بتتبع الاختيار (تصفية عهدة / عهدة مشرف / الكل) ونفس شكل طباعة عهدة الرئيسية ============ */}
-      <div id="print-area">
-        <PrintLetterhead />
-        <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 12 }}>
-          {printMode === "grant" ? "نموذج عهدة مشرف" : printMode === "all" ? "كشف عهد فرعية — كامل" : "نموذج تصفية عهدة فرعية"}
-        </h2>
-
-        {printMode !== "clearance" && (
-          <table style={{ marginBottom: 16 }}>
-            <thead><tr>{["الاسم", "تاريخ المنح", "المبلغ الممنوح", "ملاحظات"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-            <tbody>
-              {printSubCustodies.map((c) => (
-                <tr key={c.id}><td>{c.supervisorName}</td><td>{c.date}</td><td>{fmtMoney(c.amountGiven)}</td><td>{c.notes || "—"}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        {printMode !== "grant" && printSubCustodies.map((sc) => {
-          const items = clearances.filter((x) => x.subCustodyId === sc.id);
-          if (items.length === 0) return null;
-          const t = totals[sc.id] || { given: 0, cleared: 0, remaining: 0 };
-          const grouped = CATEGORIES.map((cat) => ({
-            cat,
-            rows: withMergeInfo(sortForMerge(items.filter((x) => x.category === cat))),
-          })).filter((g) => g.rows.length > 0);
-          const noCat = withMergeInfo(sortForMerge(items.filter((x) => !x.category || !CATEGORIES.includes(x.category))));
-
-          return (
-            <div key={sc.id} style={{ marginBottom: 24, pageBreakInside: "avoid" }}>
-              <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>{sc.supervisorName} — {sc.date}</h3>
-              <table style={{ marginBottom: 10 }}>
-                <thead><tr>{["العهدة الممنوحة", "المصروف", "المتبقي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-                <tbody><tr><td>{fmtMoney(t.given)}</td><td>{fmtMoney(t.cleared)}</td><td>{fmtMoney(t.remaining)}</td></tr></tbody>
-              </table>
-
-              {[...grouped, ...(noCat.length ? [{ cat: "بنود أخرى", rows: noCat }] : [])].map((g) => (
-                <table key={g.cat} className="custody-print-table" style={{ minWidth: 900, marginBottom: 0 }}>
-                  <colgroup>
-                    <col style={{ width: "4%" }} /><col style={{ width: "10%" }} /><col style={{ width: "11%" }} />
-                    <col style={{ width: "8%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} />
-                    <col style={{ width: "26%" }} /><col style={{ width: "9%" }} />
-                    <col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} />
-                  </colgroup>
-                  <thead>
-                    <tr style={{ background: "#E8C978" }}><td colSpan={11} style={{ fontWeight: "bold", padding: "4px 8px" }}>{g.cat}</td></tr>
-                    <tr style={{ background: "#101A2E", color: "white" }}>
-                      {["م", "التاريخ", "كود المعدة", "النوع", "الماركة", "الموقع", "الغرض من الصرف", "ملاحظات", "نقدي", "تحويل", "شيك"].map((h) => <th key={h}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.rows.map((x, i) => (
-                      <tr key={x.id}>
-                        <td style={{ textAlign: "center" }}>{i + 1}</td>
-                        {x._mergeStart && <td rowSpan={x._mergeSpan} style={{ textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>{x.date}</td>}
-                        {x._mergeStart && <td rowSpan={x._mergeSpan} style={{ textAlign: "center", verticalAlign: "middle", whiteSpace: "nowrap" }}>{x.equipmentCode || "—"}</td>}
-                        {x._mergeStart && <td rowSpan={x._mergeSpan} style={{ textAlign: "center", verticalAlign: "middle" }}>{x.equipmentType || "—"}</td>}
-                        {x._mergeStart && <td rowSpan={x._mergeSpan} style={{ textAlign: "center", verticalAlign: "middle" }}>{x.brand || "—"}</td>}
-                        {x._mergeStart && <td rowSpan={x._mergeSpan} style={{ textAlign: "center", verticalAlign: "middle" }}>{x.location || "—"}</td>}
-                        <td>{x.purpose || x.description}</td>
-                        <td>{x.notes || ""}</td>
-                        <td style={{ textAlign: "center" }}>{Number(x.cash) ? fmtNum(x.cash) : ""}</td>
-                        <td style={{ textAlign: "center" }}>{Number(x.transfer) ? fmtNum(x.transfer) : ""}</td>
-                        <td style={{ textAlign: "center" }}>{Number(x.check) ? fmtNum(x.check) : ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ))}
-            </div>
-          );
-        })}
-
-        <div className="grid grid-cols-4 gap-6 mt-8 pt-4" style={{ display: "grid" }}>
-          {SIGNATURES.map((s) => (
-            <div key={s} className="text-center">
-              <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
-              <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>{s}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DatabaseView({ expenses, custodies, equipmentCodes, onDelete, onUpdate }) {
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("");
@@ -7978,81 +7503,89 @@ function DisbursementRequestsView({ requests, onAdd, onUpdate, onDelete, onToggl
       </SectionCard>
 
       {printing && (
-        <div id="print-area" className="bg-white border rounded-2xl p-8 text-sm" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif" }}>
-          <div className="flex items-center justify-between border-b-2 pb-3 mb-4" style={{ borderColor: "#101A2E" }}>
-            <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 44, objectFit: "contain" }} />
-            <div className="font-extrabold text-lg display-font" style={{ color: "#C69A3C" }}>طلب صرف</div>
+        <div id="print-area" className="bg-white border rounded-2xl" style={{ borderColor: "#E3DDCE", color: "#101A2E", fontFamily: "'Cairo', sans-serif", padding: "28px 34px", minHeight: "1050px" }}>
+          <div className="flex items-center justify-between border-b-2 pb-4 mb-6" style={{ borderColor: "#101A2E" }}>
+            <img src={LOGO_DATA_URI} alt="El Rabeh" style={{ height: 54, objectFit: "contain" }} />
+            <div className="font-extrabold text-2xl display-font" style={{ color: "#C69A3C" }}>طلب صرف</div>
           </div>
 
-          <div className="flex justify-between mb-4 text-xs">
-            <div>
-              <div className="font-bold">{printing.code}</div>
-            </div>
-            <div className="text-left">
-              <div className="font-bold mb-1">المشروع</div>
-              <div>{printing.project}</div>
-              <div className="font-bold mt-2 mb-1">لصالح</div>
-              <div>{printing.beneficiary}</div>
+          <div className="flex justify-between items-start mb-6 text-sm">
+            <div className="px-4 py-2 rounded-lg font-bold" style={{ background: "#F3EEDD", color: "#101A2E" }}>كود: {printing.code}</div>
+            <div className="text-left space-y-1">
+              <div><span className="font-bold">المشروع: </span>{printing.project}</div>
+              <div><span className="font-bold">لصالح: </span>{printing.beneficiary}</div>
+              <div><span className="font-bold">التاريخ: </span>{printing.date}</div>
             </div>
           </div>
 
-          <table className="w-full border-collapse text-sm mb-3">
+          <table className="w-full border-collapse mb-6" style={{ fontSize: 15 }}>
             <thead>
               <tr style={{ background: "#101A2E", color: "white" }}>
-                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>ملاحظات</th>
-                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>بيان</th>
-                <th className="border px-3 py-2" style={{ borderColor: "#101A2E" }}>كلي</th>
+                <th className="border px-4 py-3 text-right" style={{ borderColor: "#101A2E", width: "50%" }}>البيان</th>
+                <th className="border px-4 py-3 text-right" style={{ borderColor: "#101A2E", width: "25%" }}>ملاحظات</th>
+                <th className="border px-4 py-3 text-right" style={{ borderColor: "#101A2E", width: "25%" }}>كلي</th>
               </tr>
             </thead>
             <tbody>
               {printing.lines.map((l, i) => (
                 <tr key={i}>
-                  <td className="border px-3 py-2 text-xs" style={{ borderColor: "#E3DDCE" }}>{l.notes || ""}</td>
-                  <td className="border px-3 py-2" style={{ borderColor: "#E3DDCE" }}>{l.description}</td>
-                  <td className="border px-3 py-2 tabular-nums font-bold" style={{ borderColor: "#E3DDCE" }}>{fmtNum(l.amount)}</td>
+                  <td className="border px-4 py-3" style={{ borderColor: "#E3DDCE" }}>{l.description}</td>
+                  <td className="border px-4 py-3 text-sm" style={{ borderColor: "#E3DDCE", color: "#5B6579" }}>{l.notes || "—"}</td>
+                  <td className="border px-4 py-3 tabular-nums font-bold" style={{ borderColor: "#E3DDCE" }}>{fmtNum(l.amount)}</td>
+                </tr>
+              ))}
+              {Array.from({ length: Math.max(0, 4 - printing.lines.length) }).map((_, i) => (
+                <tr key={`filler-${i}`}>
+                  <td className="border px-4 py-3">&nbsp;</td>
+                  <td className="border px-4 py-3">&nbsp;</td>
+                  <td className="border px-4 py-3">&nbsp;</td>
                 </tr>
               ))}
               <tr style={{ background: "#F3EEDD" }}>
-                <td colSpan={2} className="border px-3 py-2 font-extrabold" style={{ borderColor: "#E3DDCE" }}>{printing.amountInWords}</td>
-                <td className="border px-3 py-2 font-extrabold tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtNum(printing.totalAmount)}</td>
+                <td colSpan={2} className="border px-4 py-3 font-extrabold" style={{ borderColor: "#E3DDCE" }}>{printing.amountInWords}</td>
+                <td className="border px-4 py-3 font-extrabold tabular-nums" style={{ borderColor: "#E3DDCE" }}>{fmtNum(printing.totalAmount)}</td>
               </tr>
             </tbody>
           </table>
 
-          {printing.attachments && (
-            <div className="text-xs mb-4"><b>مرفقات:</b> {printing.attachments}</div>
-          )}
-
-          <div className="text-center font-bold underline my-4">إذن الصرف</div>
-          <div className="flex justify-between text-xs mb-2">
-            <div>التاريخ: {printing.date}</div>
-            <div>يُعتمد صرف مبلغ وقدره <b>{fmtMoney(printing.totalAmount)}</b> — {printing.amountInWords}</div>
-          </div>
-          <div className="grid grid-cols-2 gap-6 mt-4 text-xs">
-            <div>
-              <div className="font-bold mb-1">بيانات المستفيد</div>
-              <div>اسم المستفيد / {printing.beneficiary}</div>
-              <div>اسم البنك / {printing.bankName || "—"}</div>
-              <div>رقم الحساب / {printing.accountNumber || "—"}</div>
-            </div>
-            <div>
-              <div className="font-bold mb-1">بيانات الصرف</div>
-              <div>نوع الصرف / {printing.disbursementType}</div>
-              <div>رقم المستند / {printing.documentNumber || "—"}</div>
-              <div>الحالة / {printing.status === "executed" ? "تم التنفيذ" : "لم يُنفَّذ بعد"}</div>
-            </div>
+          <div className="border rounded-lg p-4 mb-6" style={{ borderColor: "#E3DDCE", minHeight: 60 }}>
+            <span className="font-bold">مرفقات: </span>{printing.attachments || "—"}
           </div>
 
-          <div className="grid grid-cols-4 gap-6 mt-8 pt-4">
+          <div className="text-center font-extrabold text-lg underline mb-4" style={{ color: "#101A2E" }}>إذن الصرف</div>
+          <div className="p-4 rounded-lg mb-6 text-base" style={{ background: "#F3EEDD" }}>
+            يُعتمد صرف مبلغ وقدره <b>{fmtMoney(printing.totalAmount)}</b> جنيه — <b>{printing.amountInWords}</b>
+          </div>
+
+          <div className="grid grid-cols-2 gap-8 mb-8 text-sm">
+            <div className="border rounded-lg p-4" style={{ borderColor: "#E3DDCE" }}>
+              <div className="font-bold mb-2" style={{ color: "#C69A3C" }}>بيانات المستفيد</div>
+              <div className="space-y-1.5">
+                <div>اسم المستفيد / {printing.beneficiary}</div>
+                <div>اسم البنك / {printing.bankName || "—"}</div>
+                <div>رقم الحساب / {printing.accountNumber || "—"}</div>
+              </div>
+            </div>
+            <div className="border rounded-lg p-4" style={{ borderColor: "#E3DDCE" }}>
+              <div className="font-bold mb-2" style={{ color: "#C69A3C" }}>بيانات الصرف</div>
+              <div className="space-y-1.5">
+                <div>نوع الصرف / {printing.disbursementType}</div>
+                <div>رقم المستند / {printing.documentNumber || "—"}</div>
+                <div>الحالة / {printing.status === "executed" ? "تم التنفيذ" : "لم يُنفَّذ بعد"}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-6 mt-auto pt-6 border-t" style={{ borderColor: "#E3DDCE" }}>
             {["مدير الفرع", "رئيس قسم المراجعة", "رئيس قسم الحسابات", "المحاسب"].map((s) => (
               <div key={s} className="text-center">
-                <div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} />
-                <div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>{s}</div>
+                <div className="border-b pb-10 mb-1" style={{ borderColor: "#101A2E" }} />
+                <div className="font-bold text-xs" style={{ color: "#5B6579" }}>{s}</div>
               </div>
             ))}
           </div>
           {userEmail && (
-            <div className="text-center mt-4 pt-2 text-[9px]" style={{ color: "#98A1B0" }}>
+            <div className="text-center mt-6 pt-2 text-[10px]" style={{ color: "#98A1B0" }}>
               طبع بمعرفة: <span dir="ltr" style={{ display: "inline-block" }}>{userEmail}</span>
             </div>
           )}
