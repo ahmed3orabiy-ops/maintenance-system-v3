@@ -754,6 +754,8 @@ export default function App() {
   const [auditLog, saveAuditLog, auditLogLoaded] = useStorage("auditLog", []);
   const [employees, saveEmployees, employeesLoaded] = useStorage("employees", []);
   const [claims, saveClaims, claimsLoaded] = useStorage("claims", []);
+  const [claimHeaders, saveClaimHeaders, claimHeadersLoaded] = useStorage("claimHeaders", []);
+  const [claimOtherWorks, saveClaimOtherWorks, claimOtherWorksLoaded] = useStorage("claimOtherWorks", []);
   const [claimDeductions, saveClaimDeductions, claimDeductionsLoaded] = useStorage("claimDeductions", []);
   const [vehicleMissions, saveVehicleMissions, vehicleMissionsLoaded] = useStorage("vehicleMissions", []);
   const [octaneTopUps, saveOctaneTopUps, octaneTopUpsLoaded] = useStorage("octaneTopUps", []);
@@ -824,6 +826,7 @@ export default function App() {
     vehicleMissions: saveVehicleMissions, disbursementRequests: saveDisbursementRequests,
     contractors: saveContractors, contractingClientEntries: saveContractingClientEntries,
     contractingContractorEntries: saveContractingContractorEntries, contractingBank: saveContractingBank,
+    claimHeaders: saveClaimHeaders, claimOtherWorks: saveClaimOtherWorks,
   };
   const pushUndo = (storeKey, prevValue) => setLastAction([{ storeKey, prevValue }]);
   const pushUndoMulti = (entries) => setLastAction(entries);
@@ -1230,14 +1233,59 @@ export default function App() {
     showToast("تم حذف الموظف", "danger");
   };
 
+  /* ============ المستخلصات — الرأس (رقم مستخلص + فترة + عميل) ============ */
+  const addClaimHeader = (h) => {
+    if (!h.periodFrom || !h.client) { showToast("الفترة والعميل مطلوبين", "danger"); return; }
+    pushUndo("claimHeaders", claimHeaders);
+    const nextNumber = (claimHeaders.reduce((mx, x) => Math.max(mx, Number(x.claimNumber) || 0), 0) || 0) + 1;
+    saveClaimHeaders([...claimHeaders, { ...h, claimNumber: h.claimNumber || nextNumber, id: uid() }]);
+    logAudit("إضافة", "مستخلص", `مستخلص رقم ${h.claimNumber || nextNumber} — ${h.client}`);
+    showToast("تم إنشاء المستخلص");
+  };
+  const updateClaimHeader = (id, updates) => {
+    pushUndo("claimHeaders", claimHeaders);
+    saveClaimHeaders(claimHeaders.map((h) => (h.id === id ? { ...h, ...updates } : h)));
+    logAudit("تعديل", "مستخلص", id);
+    showToast("تم تعديل المستخلص");
+  };
+  const deleteClaimHeader = (id) => {
+    const hasData = claims.some((c) => c.claimId === id) || vehicleMissions.some((m) => m.claimId === id) || claimOtherWorks.some((o) => o.claimId === id) || claimDeductions.some((d) => d.claimId === id);
+    if (hasData) { showToast("مينفعش تحذف مستخلص فيه بنود مسجّلة — امسح البنود الأول", "danger"); return; }
+    pushUndo("claimHeaders", claimHeaders);
+    saveClaimHeaders(claimHeaders.filter((h) => h.id !== id));
+    logAudit("حذف", "مستخلص", id);
+    showToast("تم حذف المستخلص", "danger");
+  };
+
+  /* ============ أعمال أخرى (بند حر داخل المستخلص) ============ */
+  const addClaimOtherWork = (o) => {
+    if (!o.claimId || !(Number(o.cost) > 0)) { showToast("المستخلص والتكلفة مطلوبين", "danger"); return; }
+    pushUndo("claimOtherWorks", claimOtherWorks);
+    saveClaimOtherWorks([...claimOtherWorks, { ...o, cost: Number(o.cost) || 0, id: uid() }]);
+    logAudit("إضافة", "عمل آخر بالمستخلص", `${o.description || ""} — ${fmtMoney(o.cost)}`);
+    showToast("تم الحفظ");
+  };
+  const updateClaimOtherWork = (id, updates) => {
+    pushUndo("claimOtherWorks", claimOtherWorks);
+    saveClaimOtherWorks(claimOtherWorks.map((o) => (o.id === id ? { ...o, ...updates, cost: Number(updates.cost) || 0 } : o)));
+    logAudit("تعديل", "عمل آخر بالمستخلص", id);
+    showToast("تم التعديل");
+  };
+  const deleteClaimOtherWork = (id) => {
+    pushUndo("claimOtherWorks", claimOtherWorks);
+    saveClaimOtherWorks(claimOtherWorks.filter((o) => o.id !== id));
+    logAudit("حذف", "عمل آخر بالمستخلص", id);
+    showToast("تم الحذف", "danger");
+  };
+
   const addClaim = (c) => {
+    if (!c.claimId) { showToast("لازم تختار المستخلص الأول", "danger"); return; }
     pushUndo("claims", claims);
     const monthlyRate = Number(c.monthlyRate) || 0;
     const hourlyRate = monthlyRate / 196;
     const hoursWorked = Number(c.hoursWorked) || 0;
-    const claimMonth = (c.periodFrom || "").slice(0, 7);
-    saveClaims([...claims, { ...c, claimMonth, hourlyRate, total: hourlyRate * hoursWorked, id: uid() }]);
-    logAudit("إضافة", "مستخلص", `${c.owner || ""} — ${c.equipmentCode || "بند مستخلص"} — ${c.periodFrom || ""}`);
+    saveClaims([...claims, { ...c, hourlyRate, total: hourlyRate * hoursWorked, id: uid() }]);
+    logAudit("إضافة", "بند أعمال معدات", `${c.equipmentCode || "بند مستخلص"}`);
     showToast("تم حفظ بند المستخلص");
   };
   const updateClaim = (id, updates) => {
@@ -1246,8 +1294,7 @@ export default function App() {
     const monthlyRate = Number(updates.monthlyRate) || 0;
     const hourlyRate = monthlyRate / 196;
     const hoursWorked = Number(updates.hoursWorked) || 0;
-    const claimMonth = (updates.periodFrom || "").slice(0, 7);
-    saveClaims(claims.map((c) => (c.id === id ? { ...c, ...updates, claimMonth, hourlyRate, total: hourlyRate * hoursWorked } : c)));
+    saveClaims(claims.map((c) => (c.id === id ? { ...c, ...updates, hourlyRate, total: hourlyRate * hoursWorked } : c)));
     logAudit("تعديل", "مستخلص", c0 ? c0.equipmentCode : id);
     showToast("تم تعديل بند المستخلص");
   };
@@ -1261,6 +1308,7 @@ export default function App() {
 
   /* ============ مأموريات السيارات ============ */
   const addVehicleMission = (m) => {
+    if (!m.claimId) { showToast("لازم تختار المستخلص الأول", "danger"); return; }
     pushUndo("vehicleMissions", vehicleMissions);
     const total = (Number(m.transportCost) || 0) + (Number(m.cardsScalesFees) || 0);
     saveVehicleMissions([...vehicleMissions, { ...m, total, id: uid() }]);
@@ -1375,10 +1423,10 @@ export default function App() {
 
   /* ============ خصومات المستخلص (مرتبات/سلف/سولار تدفعه الشركة وتخصمه) ============ */
   const addClaimDeduction = (d) => {
-    if (!d.owner || !d.claimMonth || !(Number(d.amount) > 0)) { showToast("الشركة والشهر والمبلغ مطلوبين", "danger"); return; }
+    if (!d.claimId || !(Number(d.amount) > 0)) { showToast("المستخلص والمبلغ مطلوبين", "danger"); return; }
     pushUndo("claimDeductions", claimDeductions);
     saveClaimDeductions([...claimDeductions, { ...d, amount: Number(d.amount) || 0, id: uid() }]);
-    logAudit("إضافة", "خصم مستخلص", `${d.owner} — ${d.type || ""} — ${fmtMoney(d.amount)}`);
+    logAudit("إضافة", "خصم مستخلص", `${d.type || ""} — ${fmtMoney(d.amount)}`);
     showToast("تم حفظ الخصم");
   };
   const updateClaimDeduction = (id, updates) => {
@@ -1449,7 +1497,7 @@ export default function App() {
     showToast(`تم استيراد ${newCustodies.length} عهدة و ${newExpenses.length} بند صرف`);
   };
 
-  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded || !vehicleMissionsLoaded || !disbursementRequestsLoaded || !contractorsLoaded || !contractingClientEntriesLoaded || !contractingContractorEntriesLoaded || !contractingBankLoaded;
+  const loading = !expensesLoaded || !custodiesLoaded || !subCustodiesLoaded || !subClearancesLoaded || !fuelLoaded || !codesLoaded || !salariesLoaded || !auditLogLoaded || !employeesLoaded || !claimsLoaded || !claimHeadersLoaded || !claimOtherWorksLoaded || !accountsLoaded || !manualEntriesLoaded || !fiscalClosingsLoaded || !claimDeductionsLoaded || !octaneTopUpsLoaded || !bankTransactionsLoaded || !vehicleMissionsLoaded || !disbursementRequestsLoaded || !contractorsLoaded || !contractingClientEntriesLoaded || !contractingContractorEntriesLoaded || !contractingBankLoaded;
 
   const NAV_GROUPS = [
     {
@@ -1748,7 +1796,17 @@ export default function App() {
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
             {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
-            {view === "claims" && <ClaimsView claims={claims} claimDeductions={claimDeductions} vehicleMissions={vehicleMissions} equipmentCodes={equipmentCodes} expenses={expenses} onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim} onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction} onAddMission={addVehicleMission} onUpdateMission={updateVehicleMission} onDeleteMission={deleteVehicleMission} />}
+            {view === "claims" && (
+              <ClaimsView
+                claimHeaders={claimHeaders} claims={claims} claimDeductions={claimDeductions} vehicleMissions={vehicleMissions} claimOtherWorks={claimOtherWorks}
+                equipmentCodes={equipmentCodes} expenses={expenses}
+                onAddHeader={addClaimHeader} onUpdateHeader={updateClaimHeader} onDeleteHeader={deleteClaimHeader}
+                onAddClaim={addClaim} onUpdateClaim={updateClaim} onDeleteClaim={deleteClaim}
+                onAddDeduction={addClaimDeduction} onUpdateDeduction={updateClaimDeduction} onDeleteDeduction={deleteClaimDeduction}
+                onAddMission={addVehicleMission} onUpdateMission={updateVehicleMission} onDeleteMission={deleteVehicleMission}
+                onAddOtherWork={addClaimOtherWork} onUpdateOtherWork={updateClaimOtherWork} onDeleteOtherWork={deleteClaimOtherWork}
+              />
+            )}
             {view === "departmentBank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={addBankTransaction} onDelete={deleteBankTransaction} />}
             {view === "disbursementRequests" && <DisbursementRequestsView requests={disbursementRequests} onAdd={addDisbursementRequest} onUpdate={updateDisbursementRequest} onDelete={deleteDisbursementRequest} onToggleExecuted={markDisbursementExecuted} userEmail={authUser && authUser.email} />}
             {view === "contractingDept" && <ContractingDeptView contractors={contractors} clientEntries={contractingClientEntries} contractorEntries={contractingContractorEntries} bank={contractingBank} onAddContractor={addContractor} onUpdateContractor={updateContractor} onDeleteContractor={deleteContractor} onAddClientEntry={addContractingClientEntry} onDeleteClientEntry={deleteContractingClientEntry} onAddContractorEntry={addContractingContractorEntry} onDeleteContractorEntry={deleteContractingContractorEntry} onAddBankTx={addContractingBankTx} onDeleteBankTx={deleteContractingBankTx} />}
@@ -5957,438 +6015,611 @@ function CompanyComparisonView({ expenses, revenues, fuelRecords, oilRecords, sa
   );
 }
 
-const CLAIM_DEDUCTION_TYPES = ["أجور ومرتبات", "دفعات مقدمة - سلف", "مسحوبات سولار", "توريدات زيوت ومواد تشغيل دورية", "خصومات أخرى"];
+const CLAIM_DEDUCTION_TYPES = ["أجور ومرتبات", "سلف ودفعات مقدمة", "مبالغ مدفوعة تحت حساب توريدات", "أخرى"];
 
-function claimTypesFor(sources) {
-  return [
-    { key: "own0", equipmentOwner: sources[0], owner: sources[0], label: `معدات ${sources[0]} تعمل لدى ${sources[0]}` },
-    { key: "own1", equipmentOwner: sources[1], owner: sources[1], label: `معدات ${sources[1]} تعمل لدى ${sources[1]}` },
-    { key: "cross01", equipmentOwner: sources[0], owner: sources[1], label: `معدات ${sources[0]} تعمل لدى ${sources[1]}` },
-    { key: "cross10", equipmentOwner: sources[1], owner: sources[0], label: `معدات ${sources[1]} تعمل لدى ${sources[0]}` },
-  ];
-}
+/* ============================================================
+   المستخلصات — زي تاب "العهد والصرف": مستخلصات (إنشاء) + إدخال بنود مستخلص + طباعة
+============================================================ */
+function ClaimsView({
+  claimHeaders, claims, claimDeductions, vehicleMissions, claimOtherWorks, equipmentCodes, expenses,
+  onAddHeader, onUpdateHeader, onDeleteHeader,
+  onAddClaim, onUpdateClaim, onDeleteClaim,
+  onAddDeduction, onUpdateDeduction, onDeleteDeduction,
+  onAddMission, onUpdateMission, onDeleteMission,
+  onAddOtherWork, onUpdateOtherWork, onDeleteOtherWork,
+}) {
+  const [mode, setMode] = useState("headers"); // headers | entry
 
-function ClaimsView({ claims, claimDeductions, vehicleMissions, equipmentCodes, expenses, onAddClaim, onUpdateClaim, onDeleteClaim, onAddDeduction, onUpdateDeduction, onDeleteDeduction, onAddMission, onUpdateMission, onDeleteMission }) {
-  const CLAIM_TYPES = useMemo(() => claimTypesFor(SOURCES), []);
-  const [activeTypeKey, setActiveTypeKey] = useState(CLAIM_TYPES[0].key);
-  const activeType = CLAIM_TYPES.find((t) => t.key === activeTypeKey) || CLAIM_TYPES[0];
-  const [activeMonth, setActiveMonth] = useState("الكل");
+  const codeMap = useMemo(() => {
+    const map = {};
+    (equipmentCodes || []).forEach((c) => {
+      if (isCostPoolCode(c.code)) return;
+      map[normCode(c.code)] = { display: String(c.code || ""), type: c.type, brand: c.brand, location: c.location };
+    });
+    return map;
+  }, [equipmentCodes]);
+  const codeOptions = useMemo(() => Object.values(codeMap).sort((a, b) => a.display.localeCompare(b.display)), [codeMap]);
 
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const emptyEntitlement = { periodFrom: todayISO(), periodTo: todayISO(), equipmentCode: "", monthlyRate: "", location: "", hoursWorked: "", notes: "" };
-  const [form, setForm] = useState(emptyEntitlement);
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  /* ===== المستخلصات (الرأس) ===== */
+  const [showHeaderForm, setShowHeaderForm] = useState(false);
+  const [editingHeaderId, setEditingHeaderId] = useState(null);
+  const emptyHeader = { claimNumber: "", periodFrom: todayISO(), periodTo: todayISO(), client: SOURCES[0] };
+  const [headerForm, setHeaderForm] = useState(emptyHeader);
+  const setH = (k) => (e) => setHeaderForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const [showDedForm, setShowDedForm] = useState(false);
-  const [editingDedId, setEditingDedId] = useState(null);
-  const emptyDeduction = { claimMonth: todayISO().slice(0, 7), type: CLAIM_DEDUCTION_TYPES[0], description: "", amount: "" };
-  const [dedForm, setDedForm] = useState(emptyDeduction);
-  const setDed = (k) => (e) => setDedForm((f) => ({ ...f, [k]: e.target.value }));
+  const startAddHeader = () => { setEditingHeaderId(null); setHeaderForm(emptyHeader); setShowHeaderForm(true); };
+  const startEditHeader = (h) => {
+    setEditingHeaderId(h.id);
+    setHeaderForm({ claimNumber: h.claimNumber || "", periodFrom: h.periodFrom || todayISO(), periodTo: h.periodTo || todayISO(), client: h.client || SOURCES[0] });
+    setShowHeaderForm(true);
+  };
+  const cancelHeaderForm = () => { setShowHeaderForm(false); setEditingHeaderId(null); setHeaderForm(emptyHeader); };
+  const submitHeader = (e) => {
+    e.preventDefault();
+    if (editingHeaderId) onUpdateHeader(editingHeaderId, headerForm);
+    else onAddHeader(headerForm);
+    cancelHeaderForm();
+  };
 
+  const claimTotal = (claimId) => {
+    const missionsT = vehicleMissions.filter((m) => m.claimId === claimId).reduce((s, m) => s + (Number(m.total) || 0), 0);
+    const equipT = claims.filter((c) => c.claimId === claimId).reduce((s, c) => s + (Number(c.total) || 0), 0);
+    const otherT = claimOtherWorks.filter((o) => o.claimId === claimId).reduce((s, o) => s + (Number(o.cost) || 0), 0);
+    const dedT = claimDeductions.filter((d) => d.claimId === claimId).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    const gross = missionsT + equipT + otherT;
+    return { missionsT, equipT, otherT, gross, dedT, net: gross - dedT };
+  };
+
+  /* ===== إدخال بنود مستخلص ===== */
+  const [selectedClaimId, setSelectedClaimId] = useState(claimHeaders[0]?.id || "");
+  const [entryTab, setEntryTab] = useState("missions"); // missions | equipment | other | deductions
+  const selectedHeader = claimHeaders.find((h) => h.id === selectedClaimId) || null;
+
+  // -- مأموريات السيارات
   const [showMissionForm, setShowMissionForm] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState(null);
-  const emptyMission = { date: todayISO(), vehicleNumber: "", vehicleType: "", missionNature: "", from: "", to: "", transportCost: "", cardsScalesFees: "" };
+  const emptyMission = { date: todayISO(), vehicleCode: "", vehicleType: "", location: "", cargoDescription: "", missionDescription: "", transportCost: "", cardsScalesFees: "" };
   const [missionForm, setMissionForm] = useState(emptyMission);
-  const setMission = (k) => (e) => setMissionForm((f) => ({ ...f, [k]: e.target.value }));
-
-  const knownLocations = useMemo(() => {
-    const s = new Set();
-    equipmentCodes.forEach((c) => { if (c.location) s.add(cleanText(c.location)); });
-    expenses.forEach((e) => { if (e.location) s.add(cleanText(e.location)); });
-    return [...s].sort();
-  }, [equipmentCodes, expenses]);
-
-  const handleCodeChange = (e) => {
+  const setM = (k) => (e) => setMissionForm((f) => ({ ...f, [k]: e.target.value }));
+  const handleMissionCodeChange = (e) => {
     const code = e.target.value;
-    const known = equipmentCodes.find((c) => c.code === code);
-    setForm((f) => ({ ...f, equipmentCode: code, location: known && known.location ? known.location : f.location }));
+    const known = codeMap[normCode(code)];
+    setMissionForm((f) => ({ ...f, vehicleCode: code, vehicleType: known ? known.type : f.vehicleType, location: known && known.location ? known.location : f.location }));
   };
-
-  const typeClaims = useMemo(() => claims.filter((c) => (c.owner || SOURCES[0]) === activeType.owner && (c.equipmentOwner || c.owner || SOURCES[0]) === activeType.equipmentOwner), [claims, activeType]);
-  const typeDeductions = useMemo(() => claimDeductions.filter((d) => d.owner === activeType.owner && (d.equipmentOwner || d.owner) === activeType.equipmentOwner), [claimDeductions, activeType]);
-  const typeMissions = useMemo(() => vehicleMissions.filter((m) => m.owner === activeType.owner && (m.equipmentOwner || m.owner) === activeType.equipmentOwner), [vehicleMissions, activeType]);
-
-  const months = useMemo(() => [...new Set([...typeClaims.map((c) => c.claimMonth), ...typeDeductions.map((d) => d.claimMonth), ...typeMissions.map((m) => (m.date || "").slice(0, 7))])].filter(Boolean).sort().reverse(), [typeClaims, typeDeductions, typeMissions]);
-
-  const list = typeClaims.filter((c) => activeMonth === "الكل" || c.claimMonth === activeMonth).sort((a, b) => (b.periodFrom || "").localeCompare(a.periodFrom || ""));
-  const dedList = typeDeductions.filter((d) => activeMonth === "الكل" || d.claimMonth === activeMonth);
-  const missionList = typeMissions.filter((m) => activeMonth === "الكل" || (m.date || "").slice(0, 7) === activeMonth).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
-  const equipmentGross = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
-  const missionsGross = missionList.reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const gross = equipmentGross + missionsGross;
-  const dedTotal = dedList.reduce((s, d) => s + (Number(d.amount) || 0), 0);
-  const net = gross - dedTotal;
-
-  const startAdd = () => { setEditingId(null); setForm({ ...emptyEntitlement, periodFrom: activeMonth !== "الكل" ? `${activeMonth}-01` : emptyEntitlement.periodFrom }); setShowForm(true); };
-  const startEdit = (c) => {
-    setEditingId(c.id);
-    setForm({ periodFrom: c.periodFrom || (c.claimMonth ? `${c.claimMonth}-01` : todayISO()), periodTo: c.periodTo || c.periodFrom || todayISO(), equipmentCode: c.equipmentCode || "", monthlyRate: c.monthlyRate ?? "", location: c.location || "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
-    setShowForm(true);
-  };
-  const cancel = () => { setShowForm(false); setEditingId(null); setForm(emptyEntitlement); };
-  const submit = (e) => {
-    e.preventDefault();
-    const payload = { ...form, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
-    if (editingId) onUpdateClaim(editingId, payload); else onAddClaim(payload);
-    cancel();
-  };
-
-  const startAddDed = () => { setEditingDedId(null); setDedForm({ ...emptyDeduction, claimMonth: activeMonth !== "الكل" ? activeMonth : emptyDeduction.claimMonth }); setShowDedForm(true); };
-  const startEditDed = (d) => { setEditingDedId(d.id); setDedForm({ claimMonth: d.claimMonth, type: d.type, description: d.description || "", amount: d.amount }); setShowDedForm(true); };
-  const cancelDed = () => { setShowDedForm(false); setEditingDedId(null); setDedForm(emptyDeduction); };
-  const submitDed = (e) => {
-    e.preventDefault();
-    const payload = { ...dedForm, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
-    if (editingDedId) onUpdateDeduction(editingDedId, payload); else onAddDeduction(payload);
-    cancelDed();
-  };
-
-  const startAddMission = () => { setEditingMissionId(null); setMissionForm({ ...emptyMission, date: activeMonth !== "الكل" ? `${activeMonth}-01` : emptyMission.date }); setShowMissionForm(true); };
+  const startAddMission = () => { setEditingMissionId(null); setMissionForm(emptyMission); setShowMissionForm(true); };
   const startEditMission = (m) => {
     setEditingMissionId(m.id);
-    setMissionForm({ date: m.date || todayISO(), vehicleNumber: m.vehicleNumber || "", vehicleType: m.vehicleType || "", missionNature: m.missionNature || "", from: m.from || "", to: m.to || "", transportCost: m.transportCost ?? "", cardsScalesFees: m.cardsScalesFees ?? "" });
+    setMissionForm({ date: m.date || todayISO(), vehicleCode: m.vehicleCode || "", vehicleType: m.vehicleType || "", location: m.location || "", cargoDescription: m.cargoDescription || "", missionDescription: m.missionDescription || "", transportCost: m.transportCost ?? "", cardsScalesFees: m.cardsScalesFees ?? "" });
     setShowMissionForm(true);
   };
-  const cancelMission = () => { setShowMissionForm(false); setEditingMissionId(null); setMissionForm(emptyMission); };
+  const cancelMissionForm = () => { setShowMissionForm(false); setEditingMissionId(null); setMissionForm(emptyMission); };
+  const missionTotalPreview = (Number(missionForm.transportCost) || 0) + (Number(missionForm.cardsScalesFees) || 0);
   const submitMission = (e) => {
     e.preventDefault();
-    const payload = { ...missionForm, owner: activeType.owner, equipmentOwner: activeType.equipmentOwner };
+    const payload = { ...missionForm, claimId: selectedClaimId, vehicleNumber: missionForm.vehicleCode, missionNature: missionForm.missionDescription };
     if (editingMissionId) onUpdateMission(editingMissionId, payload); else onAddMission(payload);
-    cancelMission();
+    cancelMissionForm();
   };
-  const missionTotalPreview = (Number(missionForm.transportCost) || 0) + (Number(missionForm.cardsScalesFees) || 0);
 
-  const hourlyPreview = (Number(form.monthlyRate) || 0) / 196;
-  const totalPreview = hourlyPreview * (Number(form.hoursWorked) || 0);
+  // -- أعمال المعدات
+  const [showEquipForm, setShowEquipForm] = useState(false);
+  const [editingEquipId, setEditingEquipId] = useState(null);
+  const emptyEquip = { equipmentCode: "", equipmentType: "", brand: "", location: "", monthlyRate: "", hoursWorked: "", notes: "" };
+  const [equipForm, setEquipForm] = useState(emptyEquip);
+  const setEq = (k) => (e) => setEquipForm((f) => ({ ...f, [k]: e.target.value }));
+  const handleEquipCodeChange = (e) => {
+    const code = e.target.value;
+    const known = codeMap[normCode(code)];
+    setEquipForm((f) => ({ ...f, equipmentCode: code, equipmentType: known ? known.type : f.equipmentType, brand: known ? known.brand : f.brand, location: known && known.location ? known.location : f.location }));
+  };
+  const startAddEquip = () => { setEditingEquipId(null); setEquipForm(emptyEquip); setShowEquipForm(true); };
+  const startEditEquip = (c) => {
+    setEditingEquipId(c.id);
+    setEquipForm({ equipmentCode: c.equipmentCode || "", equipmentType: c.equipmentType || "", brand: c.brand || "", location: c.location || "", monthlyRate: c.monthlyRate ?? "", hoursWorked: c.hoursWorked ?? "", notes: c.notes || "" });
+    setShowEquipForm(true);
+  };
+  const cancelEquipForm = () => { setShowEquipForm(false); setEditingEquipId(null); setEquipForm(emptyEquip); };
+  const equipHourlyPreview = (Number(equipForm.monthlyRate) || 0) / 196;
+  const equipTotalPreview = equipHourlyPreview * (Number(equipForm.hoursWorked) || 0);
+  const submitEquip = (e) => {
+    e.preventDefault();
+    const payload = { ...equipForm, claimId: selectedClaimId };
+    if (editingEquipId) onUpdateClaim(editingEquipId, payload); else onAddClaim(payload);
+    cancelEquipForm();
+  };
 
-  // ملخص المواقع لصفحة الغلاف وقت الطباعة
-  const byLocation = useMemo(() => {
-    const map = {};
-    list.forEach((c) => {
-      const loc = c.location || "بدون موقع";
-      map[loc] = (map[loc] || 0) + (Number(c.total) || 0);
-    });
-    return Object.entries(map).map(([location, total]) => ({ location, total })).sort((a, b) => b.total - a.total);
-  }, [list]);
+  // -- أعمال أخرى
+  const [showOtherForm, setShowOtherForm] = useState(false);
+  const [editingOtherId, setEditingOtherId] = useState(null);
+  const emptyOther = { location: "", description: "", cost: "", notes: "" };
+  const [otherForm, setOtherForm] = useState(emptyOther);
+  const setO = (k) => (e) => setOtherForm((f) => ({ ...f, [k]: e.target.value }));
+  const startAddOther = () => { setEditingOtherId(null); setOtherForm(emptyOther); setShowOtherForm(true); };
+  const startEditOther = (o) => { setEditingOtherId(o.id); setOtherForm({ location: o.location || "", description: o.description || "", cost: o.cost ?? "", notes: o.notes || "" }); setShowOtherForm(true); };
+  const cancelOtherForm = () => { setShowOtherForm(false); setEditingOtherId(null); setOtherForm(emptyOther); };
+  const submitOther = (e) => {
+    e.preventDefault();
+    const payload = { ...otherForm, claimId: selectedClaimId };
+    if (editingOtherId) onUpdateOtherWork(editingOtherId, payload); else onAddOtherWork(payload);
+    cancelOtherForm();
+  };
 
-  /* ============ تقرير الاعتماد + جسم المستخلص ============ */
-  const [reportMode, setReportMode] = useState("data"); // data | approval | body
-  const [selectedSite, setSelectedSite] = useState("");
+  // -- الاستقطاعات
+  const [showDedForm, setShowDedForm] = useState(false);
+  const [editingDedId, setEditingDedId] = useState(null);
+  const emptyDed = { type: CLAIM_DEDUCTION_TYPES[0], description: "", amount: "" };
+  const [dedForm, setDedForm] = useState(emptyDed);
+  const setD = (k) => (e) => setDedForm((f) => ({ ...f, [k]: e.target.value }));
+  const startAddDed = () => { setEditingDedId(null); setDedForm(emptyDed); setShowDedForm(true); };
+  const startEditDed = (d) => { setEditingDedId(d.id); setDedForm({ type: d.type || CLAIM_DEDUCTION_TYPES[0], description: d.description || "", amount: d.amount ?? "" }); setShowDedForm(true); };
+  const cancelDedForm = () => { setShowDedForm(false); setEditingDedId(null); setDedForm(emptyDed); };
+  const submitDed = (e) => {
+    e.preventDefault();
+    const payload = { ...dedForm, claimId: selectedClaimId };
+    if (editingDedId) onUpdateDeduction(editingDedId, payload); else onAddDeduction(payload);
+    cancelDedForm();
+  };
 
-  const allSites = useMemo(() => {
-    const s = new Set();
-    list.forEach((c) => { if (c.location) s.add(c.location); });
-    missionList.forEach((m) => { if (m.from) s.add(m.from); if (m.to) s.add(m.to); });
-    return [...s].sort();
-  }, [list, missionList]);
+  const claimMissions = claims && selectedClaimId ? vehicleMissions.filter((m) => m.claimId === selectedClaimId) : [];
+  const claimEquip = selectedClaimId ? claims.filter((c) => c.claimId === selectedClaimId) : [];
+  const claimOther = selectedClaimId ? claimOtherWorks.filter((o) => o.claimId === selectedClaimId) : [];
+  const claimDeds = selectedClaimId ? claimDeductions.filter((d) => d.claimId === selectedClaimId) : [];
+  const selTotals = selectedClaimId ? claimTotal(selectedClaimId) : { missionsT: 0, equipT: 0, otherT: 0, gross: 0, dedT: 0, net: 0 };
 
-  useEffect(() => {
-    if (!selectedSite && allSites.length) setSelectedSite(allSites[0]);
-  }, [allSites, selectedSite]);
-
-  const siteEquipmentRows = useMemo(() => list.filter((c) => c.location === selectedSite), [list, selectedSite]);
-  const siteMissionRows = useMemo(() => missionList.filter((m) => m.from === selectedSite || m.to === selectedSite), [missionList, selectedSite]);
-  const siteEquipmentTotal = siteEquipmentRows.reduce((s, c) => s + (Number(c.total) || 0), 0);
-  const siteMissionTotal = siteMissionRows.reduce((s, m) => s + (Number(m.total) || 0), 0);
-  const siteGrandTotal = siteEquipmentTotal + siteMissionTotal;
-
-  // بيان توزيع تكلفة استخدام المعدات حسب مواقع العمل (شامل المعدات + مأموريات السيارات لكل موقع)
-  const siteDistribution = useMemo(() => {
-    return allSites.map((site) => {
-      const eq = list.filter((c) => c.location === site).reduce((s, c) => s + (Number(c.total) || 0), 0);
-      const ms = missionList.filter((m) => m.from === site || m.to === site).reduce((s, m) => s + (Number(m.total) || 0), 0);
-      return { site, total: eq + ms };
-    }).filter((r) => r.total > 0).sort((a, b) => b.total - a.total);
-  }, [allSites, list, missionList]);
-  const siteDistributionTotal = siteDistribution.reduce((s, r) => s + r.total, 0);
-  const bodyNet = siteDistributionTotal - dedTotal;
-
+  /* ===== الطباعة ===== */
+  const [printMode, setPrintMode] = useState("cover"); // byLocation | cover
+  const [printLocation, setPrintLocation] = useState("");
   const handlePrint = () => window.print();
+
+  const allLocations = useMemo(() => {
+    const s = new Set();
+    claimMissions.forEach((m) => { if (m.location) s.add(m.location); });
+    claimEquip.forEach((c) => { if (c.location) s.add(c.location); });
+    claimOther.forEach((o) => { if (o.location) s.add(o.location); });
+    return [...s].sort();
+  }, [claimMissions, claimEquip, claimOther]);
+
+  const byLocationSummary = useMemo(() => {
+    return allLocations.map((loc) => {
+      const eq = claimEquip.filter((c) => c.location === loc).reduce((s, c) => s + (Number(c.total) || 0), 0);
+      const ms = claimMissions.filter((m) => m.location === loc).reduce((s, m) => s + (Number(m.total) || 0), 0);
+      const ot = claimOther.filter((o) => o.location === loc).reduce((s, o) => s + (Number(o.cost) || 0), 0);
+      return { location: loc, equipment: eq, missions: ms, other: ot, total: eq + ms + ot };
+    });
+  }, [allLocations, claimEquip, claimMissions, claimOther]);
 
   return (
     <div className="space-y-6">
       <Header
         title="المستخلصات"
-        sub="مستخلص شهري بأربع صور — حسب مالك المعدة والجهة اللي شغّالة عندها — استحقاقات واستقطاعات وصافي"
+        sub="مستخلص لكل عميل — استحقاقات (مأموريات سيارات، أعمال معدات، أعمال أخرى) واستقطاعات وصافي"
         action={
-          <div className="no-print flex flex-wrap gap-2">
-            <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
-              <Printer size={16} /> طباعة
-            </button>
+          <div className="no-print flex flex-wrap items-end gap-2">
+            {mode === "entry" && selectedHeader && (
+              <>
+                <Select value={printMode} onChange={(e) => setPrintMode(e.target.value)} className="w-56">
+                  <option value="cover">اطبع: كفر إجمالي</option>
+                  <option value="byLocation">اطبع: بيان بموقع واحد</option>
+                </Select>
+                {printMode === "byLocation" && (
+                  <Select value={printLocation} onChange={(e) => setPrintLocation(e.target.value)} className="w-44">
+                    <option value="">اختر الموقع...</option>
+                    {allLocations.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </Select>
+                )}
+                <button onClick={handlePrint} className="px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+                  <Printer size={16} /> طباعة
+                </button>
+              </>
+            )}
           </div>
         }
       />
 
-      <div className="no-print flex flex-wrap gap-2">
-        {CLAIM_TYPES.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => { setActiveTypeKey(t.key); setActiveMonth("الكل"); }}
-            className="px-3 py-2 rounded-lg text-xs font-bold"
-            style={{ background: activeTypeKey === t.key ? COLORS.navy : COLORS.cream, color: activeTypeKey === t.key ? "white" : COLORS.slate }}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="no-print flex gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+        <button onClick={() => setMode("headers")} className="px-5 py-2 rounded-lg text-sm font-bold transition" style={{ background: mode === "headers" ? COLORS.navy : "transparent", color: mode === "headers" ? "white" : COLORS.slate }}>المستخلصات</button>
+        <button onClick={() => setMode("entry")} className="px-5 py-2 rounded-lg text-sm font-bold transition" style={{ background: mode === "entry" ? COLORS.navy : "transparent", color: mode === "entry" ? "white" : COLORS.slate }}>إدخال بنود مستخلص</button>
       </div>
 
-      <div className="no-print flex flex-wrap items-center gap-2">
-        <span className="text-xs font-bold" style={{ color: COLORS.slate }}>الشهر:</span>
-        <button onClick={() => setActiveMonth("الكل")} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === "الكل" ? COLORS.navy : COLORS.cream, color: activeMonth === "الكل" ? "white" : COLORS.slate }}>الكل</button>
-        {months.map((m) => (
-          <button key={m} onClick={() => setActiveMonth(m)} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: activeMonth === m ? COLORS.navy : COLORS.cream, color: activeMonth === m ? "white" : COLORS.slate }}>{m}</button>
-        ))}
-      </div>
+      {mode === "headers" && (
+        <div className="no-print space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => (showHeaderForm ? cancelHeaderForm() : startAddHeader())} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.gold, color: COLORS.navy }}>
+              {showHeaderForm ? <X size={16} /> : <Plus size={16} />} {showHeaderForm ? "إلغاء" : "إنشاء مستخلص جديد"}
+            </button>
+          </div>
 
-      <div className="no-print flex flex-wrap items-center gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
-        {[["data", "بيانات المستخلص"], ["approval", "تقرير الاعتماد (لكل موقع)"], ["body", "جسم المستخلص النهائي"]].map(([k, label]) => (
-          <button
-            key={k}
-            onClick={() => setReportMode(k)}
-            className="px-4 py-2 rounded-lg text-xs font-bold"
-            style={{ background: reportMode === k ? COLORS.navy : "transparent", color: reportMode === k ? "white" : COLORS.slate }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {reportMode === "approval" && (
-        <div className="no-print max-w-sm">
-          <Field label="اختر الموقع">
-            <Select value={selectedSite} onChange={(e) => setSelectedSite(e.target.value)}>
-              {allSites.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
-          </Field>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-          <form onSubmit={submit} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingId ? "تعديل بند استحقاق" : "بند استحقاق جديد"}</h3>
-              <button type="button" onClick={cancel} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-            </div>
-            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="الفترة من" required><TextInput type="date" value={form.periodFrom} onChange={set("periodFrom")} required /></Field>
-              <Field label="الفترة إلى" required><TextInput type="date" value={form.periodTo} onChange={set("periodTo")} required /></Field>
-              <Field label="كود المعدة" required>
-                <TextInput list="claim-codes" value={form.equipmentCode} onChange={handleCodeChange} required placeholder="مثال: EX-200-32" />
-                <datalist id="claim-codes">{equipmentCodes.filter((c) => c.owner === activeType.equipmentOwner).map((c) => <option key={c.id} value={c.code} />)}</datalist>
-              </Field>
-              <Field label="موقع العمل">
-                <Select value={form.location} onChange={set("location")}>
-                  <option value="">اختر الموقع...</option>
-                  {knownLocations.map((l) => <option key={l} value={l}>{l}</option>)}
-                  {form.location && !knownLocations.includes(form.location) && <option value={form.location}>{form.location}</option>}
-                </Select>
-              </Field>
-              <Field label="الأجر الشهري" required><TextInput type="number" step="0.01" value={form.monthlyRate} onChange={set("monthlyRate")} required placeholder="0" /></Field>
-              <Field label="عدد ساعات العمل" required><TextInput type="number" step="0.01" value={form.hoursWorked} onChange={set("hoursWorked")} required placeholder="0" /></Field>
-              <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
-            </div>
-            <div className="flex items-center justify-between mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
-              <div className="text-sm" style={{ color: COLORS.slate }}>
-                الأجر بالساعة: <b style={{ color: COLORS.ink }}>{fmtMoney(hourlyPreview)}</b> — الإجمالي: <b style={{ color: COLORS.ink }}>{fmtMoney(totalPreview)}</b>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-4 pt-2">
-              <button type="button" onClick={cancel} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingId ? "حفظ التعديل" : "حفظ البند"}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {showDedForm && (
-        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-          <form onSubmit={submitDed} className="w-full max-w-lg rounded-2xl p-6" style={{ background: COLORS.paper }}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingDedId ? "تعديل استقطاع" : "استقطاع جديد"}</h3>
-              <button type="button" onClick={cancelDed} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-            </div>
-            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="الشهر" required><TextInput type="month" value={dedForm.claimMonth} onChange={setDed("claimMonth")} required /></Field>
-              <Field label="نوع الاستقطاع" required><Select value={dedForm.type} onChange={setDed("type")}>{CLAIM_DEDUCTION_TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
-              <Field label="المبلغ" required><TextInput type="number" step="0.01" value={dedForm.amount} onChange={setDed("amount")} required placeholder="0" /></Field>
-              <div className="md:col-span-2"><Field label="الوصف"><TextInput value={dedForm.description} onChange={setDed("description")} placeholder="مثال: مرتب السائق فلان" /></Field></div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6 pt-2">
-              <button type="button" onClick={cancelDed} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingDedId ? "حفظ التعديل" : "حفظ الاستقطاع"}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {showMissionForm && (
-        <div className="no-print fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
-          <form onSubmit={submitMission} className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6" style={{ background: COLORS.paper }}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingMissionId ? "تعديل مأمورية" : "مأمورية جديدة"}</h3>
-              <button type="button" onClick={cancelMission} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
-            </div>
-            <div className="text-xs font-bold mb-4" style={{ color: COLORS.gold }}>{activeType.label}</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="التاريخ" required><TextInput type="date" value={missionForm.date} onChange={setMission("date")} required /></Field>
-              <Field label="رقم السيارة" required><TextInput value={missionForm.vehicleNumber} onChange={setMission("vehicleNumber")} required placeholder="مثال: ط ط ق 3742" /></Field>
-              <Field label="النوع"><TextInput value={missionForm.vehicleType} onChange={setMission("vehicleType")} placeholder="مثال: جامبو نقل" /></Field>
-              <div className="md:col-span-3"><Field label="طبيعة المأمورية"><TextInput value={missionForm.missionNature} onChange={setMission("missionNature")} placeholder="مثال: نقل حديد" /></Field></div>
-              <Field label="من"><TextInput value={missionForm.from} onChange={setMission("from")} placeholder="نقطة الانطلاق" /></Field>
-              <Field label="إلى"><TextInput value={missionForm.to} onChange={setMission("to")} placeholder="نقطة الوصول" /></Field>
-              <div />
-              <Field label="تكلفة النقل" required><TextInput type="number" step="0.01" value={missionForm.transportCost} onChange={setMission("transportCost")} required placeholder="0" /></Field>
-              <Field label="رسوم الكارتات والموازين"><TextInput type="number" step="0.01" value={missionForm.cardsScalesFees} onChange={setMission("cardsScalesFees")} placeholder="0" /></Field>
-            </div>
-            <div className="mt-4 text-sm" style={{ color: COLORS.slate }}>
-              الإجمالي: <b style={{ color: COLORS.ink }}>{fmtMoney(missionTotalPreview)}</b>
-            </div>
-            <div className="flex justify-end gap-3 mt-4 pt-2">
-              <button type="button" onClick={cancelMission} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
-              <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingMissionId ? "حفظ التعديل" : "حفظ المأمورية"}</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div id="print-area">
-        <PrintLetterhead />
-
-        {/* غلاف الطباعة: ملخص كل موقع وإجمالي مستحقاته */}
-        <div className="hidden print:block mb-6">
-          <div className="text-center font-extrabold text-lg mb-1">{activeType.label}</div>
-          <div className="text-center text-sm mb-4" style={{ color: COLORS.slate }}>{activeMonth === "الكل" ? "كل الشهور" : activeMonth}</div>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr style={{ background: COLORS.navy, color: "white" }}>
-                <th className="border px-3 py-2 text-right">الموقع</th>
-                <th className="border px-3 py-2 text-right">إجمالي الاستحقاقات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byLocation.map((r) => (
-                <tr key={r.location}><td className="border px-3 py-2">{r.location}</td><td className="border px-3 py-2 tabular-nums">{fmtMoney(r.total)}</td></tr>
-              ))}
-              <tr style={{ background: COLORS.cream }}><td className="border px-3 py-2 font-extrabold">الإجمالي</td><td className="border px-3 py-2 font-extrabold tabular-nums">{fmtMoney(gross)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <SectionCard
-          title={`الاستحقاقات — ${activeType.label} (${list.length}) — ${fmtMoney(equipmentGross)}`}
-          action={<button onClick={startAdd} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> بند استحقاق جديد</button>}
-        >
-          {list.length === 0 ? (
-            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد بنود مطابقة</div>
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["الفترة", "كود المعدة", "موقع العمل", "الأجر الشهري", "الأجر بالساعة", "عدد الساعات", "الإجمالي", "ملاحظات", ""].map((h) => (
-                      <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((c) => (
-                    <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-xs">{c.periodFrom || "—"} → {c.periodTo || "—"}</td>
-                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
-                      <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
-                      <td className="px-3 py-2.5">{c.notes || "—"}</td>
-                      <td className="px-3 py-2.5 no-print">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => startEdit(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                          <button onClick={() => onDeleteClaim(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title={`مأموريات السيارات (${missionList.length}) — ${fmtMoney(missionsGross)}`}
-          action={<button onClick={startAddMission} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مأمورية جديدة</button>}
-        >
-          {missionList.length === 0 ? (
-            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد مأموريات مطابقة</div>
-          ) : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
-                    {["التاريخ", "رقم السيارة", "النوع", "طبيعة المأمورية", "من", "إلى", "تكلفة النقل", "رسوم الكارتات والموازين", "الإجمالي", ""].map((h) => (
-                      <th key={h} className={`px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap ${h === "" ? "no-print" : ""}`} style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {missionList.map((m) => (
-                    <tr key={m.id} className="border-t" style={{ borderColor: COLORS.border }}>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{m.date}</td>
-                      <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{m.vehicleNumber}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{m.vehicleType || "—"}</td>
-                      <td className="px-3 py-2.5">{m.missionNature || "—"}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{m.from || "—"}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">{m.to || "—"}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.transportCost)}</td>
-                      <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.cardsScalesFees)}</td>
-                      <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(m.total)}</td>
-                      <td className="px-3 py-2.5 no-print">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => startEditMission(m)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
-                          <button onClick={() => onDeleteMission(m.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title={`الاستقطاعات (${dedList.length}) — ${fmtMoney(dedTotal)}`}
-          action={<button onClick={startAddDed} className="no-print px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> استقطاع جديد</button>}
-        >
-          {dedList.length === 0 ? (
-            <div className="text-xs text-center py-6" style={{ color: COLORS.slate }}>لا توجد استقطاعات</div>
-          ) : (
-            <div className="space-y-1.5">
-              {dedList.map((d) => (
-                <div key={d.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
-                  <span>{d.type} — {d.description || "—"} <span className="text-xs" style={{ color: COLORS.slate }}>({d.claimMonth})</span></span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold tabular-nums">{fmtMoney(d.amount)}</span>
-                    <button onClick={() => startEditDed(d)} className="no-print p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={12} /></button>
-                    <button onClick={() => onDeleteDeduction(d.id)} className="no-print p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
-                  </div>
+          {showHeaderForm && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: "rgba(16,26,46,0.5)" }}>
+              <form onSubmit={submitHeader} className="w-full max-w-lg rounded-2xl p-6" style={{ background: COLORS.paper }}>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="font-bold text-lg" style={{ color: COLORS.ink }}>{editingHeaderId ? "تعديل مستخلص" : "مستخلص جديد"}</h3>
+                  <button type="button" onClick={cancelHeaderForm} className="p-1.5 rounded-md hover:bg-gray-100"><X size={18} /></button>
                 </div>
-              ))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="رقم المستخلص"><TextInput value={headerForm.claimNumber} onChange={setH("claimNumber")} placeholder="تلقائي لو سيبته فاضي" /></Field>
+                  <Field label="العميل" required><Select value={headerForm.client} onChange={setH("client")}>{SOURCES.map((s) => <option key={s}>{s}</option>)}</Select></Field>
+                  <Field label="الفترة من" required><TextInput type="date" value={headerForm.periodFrom} onChange={setH("periodFrom")} required /></Field>
+                  <Field label="الفترة إلى" required><TextInput type="date" value={headerForm.periodTo} onChange={setH("periodTo")} required /></Field>
+                </div>
+                <div className="flex justify-end gap-2 mt-6 pt-4 border-t" style={{ borderColor: COLORS.border }}>
+                  <button type="button" onClick={cancelHeaderForm} className="px-6 py-2.5 rounded-lg text-sm font-bold" style={{ color: COLORS.slate }}>إلغاء</button>
+                  <button type="submit" className="px-6 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ</button>
+                </div>
+              </form>
             </div>
           )}
-        </SectionCard>
 
-        <div className="p-4 rounded-xl flex items-center justify-between" style={{ background: COLORS.navy }}>
-          <span className="font-extrabold text-white">صافي المستحق صرفه</span>
-          <span className="font-extrabold tabular-nums text-lg" style={{ color: net >= 0 ? "#8FE3A8" : "#E0796C" }}>{fmtMoney(net)}</span>
+          {claimHeaders.length === 0 ? (
+            <SectionCard><EmptyState icon={FileSpreadsheet} title="لا توجد مستخلصات بعد" sub="ابدأ بإنشاء مستخلص جديد" /></SectionCard>
+          ) : (
+            <SectionCard title={`المستخلصات (${claimHeaders.length})`}>
+              <div className="overflow-x-auto -mx-5">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>
+                      {["رقم المستخلص", "العميل", "الفترة", "إجمالي الاستحقاقات", "الاستقطاعات", "الصافي", ""].map((h) => (
+                        <th key={h} className="px-4 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {claimHeaders.slice().sort((a, b) => (b.periodFrom || "").localeCompare(a.periodFrom || "")).map((h) => {
+                      const t = claimTotal(h.id);
+                      return (
+                        <tr key={h.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                          <td className="px-4 py-2.5 font-bold whitespace-nowrap">{h.claimNumber}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{h.client}</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap">{h.periodFrom} → {h.periodTo}</td>
+                          <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(t.gross)}</td>
+                          <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(t.dedT)}</td>
+                          <td className="px-4 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(t.net)}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { setSelectedClaimId(h.id); setMode("entry"); }} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><FilePlus2 size={14} /></button>
+                              <button onClick={() => startEditHeader(h)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={14} /></button>
+                              <button onClick={() => onDeleteHeader(h.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={14} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          )}
         </div>
-      </div>
+      )}
+
+      {mode === "entry" && (
+        <div className="space-y-4">
+          <div className="no-print max-w-md">
+            <Field label="اختر المستخلص">
+              <Select value={selectedClaimId} onChange={(e) => setSelectedClaimId(e.target.value)}>
+                <option value="">اختر مستخلص...</option>
+                {claimHeaders.map((h) => <option key={h.id} value={h.id}>{h.claimNumber} — {h.client} — {h.periodFrom}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          {!selectedHeader ? (
+            <div className="no-print text-sm text-center py-8 flex flex-col items-center gap-2" style={{ color: COLORS.slate }}>
+              <FileSpreadsheet size={28} style={{ color: COLORS.slateLight }} />
+              اختر مستخلص من القائمة فوق، أو أنشئ مستخلص جديد من تاب "المستخلصات"
+            </div>
+          ) : (
+            <>
+              <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+                  <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>مأموريات السيارات</div>
+                  <div className="text-base font-extrabold tabular-nums">{fmtMoney(selTotals.missionsT)}</div>
+                </div>
+                <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+                  <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>أعمال المعدات</div>
+                  <div className="text-base font-extrabold tabular-nums">{fmtMoney(selTotals.equipT)}</div>
+                </div>
+                <div className="p-3 rounded-xl" style={{ background: "white", border: `1px solid ${COLORS.border}` }}>
+                  <div className="text-[11px] font-bold mb-1" style={{ color: COLORS.slate }}>الاستقطاعات</div>
+                  <div className="text-base font-extrabold tabular-nums" style={{ color: COLORS.danger }}>{fmtMoney(selTotals.dedT)}</div>
+                </div>
+                <div className="p-3 rounded-xl" style={{ background: COLORS.navy }}>
+                  <div className="text-[11px] font-bold mb-1" style={{ color: "rgba(255,255,255,0.75)" }}>الصافي المستحق</div>
+                  <div className="text-base font-extrabold tabular-nums text-white">{fmtMoney(selTotals.net)}</div>
+                </div>
+              </div>
+
+              <div className="no-print flex flex-wrap gap-2 p-1 rounded-xl w-fit" style={{ background: COLORS.cream }}>
+                {[["missions", "مأموريات السيارات"], ["equipment", "أعمال المعدات"], ["other", "أعمال أخرى"], ["deductions", "الاستقطاعات"]].map(([k, label]) => (
+                  <button key={k} onClick={() => setEntryTab(k)} className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: entryTab === k ? COLORS.navy : "transparent", color: entryTab === k ? "white" : COLORS.slate }}>{label}</button>
+                ))}
+              </div>
+
+              {entryTab === "missions" && (
+                <div className="no-print space-y-3">
+                  <div className="flex justify-end">
+                    <button onClick={() => (showMissionForm ? cancelMissionForm() : startAddMission())} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> مأمورية جديدة</button>
+                  </div>
+                  {showMissionForm && (
+                    <form onSubmit={submitMission} className="p-4 rounded-lg space-y-3" style={{ background: COLORS.cream }}>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <Field label="التاريخ" required><TextInput type="date" value={missionForm.date} onChange={setM("date")} required /></Field>
+                        <Field label="كود السيارة" required>
+                          <TextInput list="mission-vehicle-codes" value={missionForm.vehicleCode} onChange={handleMissionCodeChange} required placeholder="اختر أو اكتب" />
+                          <datalist id="mission-vehicle-codes">{codeOptions.map((c) => <option key={c.display} value={c.display} />)}</datalist>
+                        </Field>
+                        <Field label="النوع"><TextInput value={missionForm.vehicleType} onChange={setM("vehicleType")} /></Field>
+                        <Field label="الموقع"><TextInput value={missionForm.location} onChange={setM("location")} /></Field>
+                        <Field label="بيان الحمولة"><TextInput value={missionForm.cargoDescription} onChange={setM("cargoDescription")} /></Field>
+                        <Field label="بيان المأمورية"><TextInput value={missionForm.missionDescription} onChange={setM("missionDescription")} /></Field>
+                        <Field label="تكلفة النقل" required><TextInput type="number" step="0.01" value={missionForm.transportCost} onChange={setM("transportCost")} required placeholder="0" /></Field>
+                        <Field label="تكلفة الكارتات والموازين"><TextInput type="number" step="0.01" value={missionForm.cardsScalesFees} onChange={setM("cardsScalesFees")} placeholder="0" /></Field>
+                      </div>
+                      <div className="flex items-center justify-between pt-2">
+                        <div className="text-sm font-bold">الإجمالي: {fmtMoney(missionTotalPreview)}</div>
+                        <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingMissionId ? "حفظ التعديل" : "حفظ"}</button>
+                      </div>
+                    </form>
+                  )}
+                  <SectionCard title={`مأموريات السيارات (${claimMissions.length}) — ${fmtMoney(selTotals.missionsT)}`}>
+                    {claimMissions.length === 0 ? <EmptyState icon={ClipboardList} title="لا توجد مأموريات مسجّلة" /> : (
+                      <div className="overflow-x-auto -mx-5">
+                        <table className="w-full text-sm">
+                          <thead><tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>{["التاريخ", "كود السيارة", "النوع", "الموقع", "الحمولة", "المأمورية", "النقل", "كارتات وموازين", "الإجمالي", ""].map((h) => <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimMissions.map((m) => (
+                              <tr key={m.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{m.date}</td>
+                                <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{m.vehicleCode}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{m.vehicleType || "—"}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{m.location || "—"}</td>
+                                <td className="px-3 py-2.5">{m.cargoDescription || "—"}</td>
+                                <td className="px-3 py-2.5">{m.missionDescription || "—"}</td>
+                                <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.transportCost)}</td>
+                                <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(m.cardsScalesFees)}</td>
+                                <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(m.total)}</td>
+                                <td className="px-3 py-2.5"><div className="flex gap-1"><button onClick={() => startEditMission(m)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button><button onClick={() => onDeleteMission(m.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button></div></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
+              )}
+
+              {entryTab === "equipment" && (
+                <div className="no-print space-y-3">
+                  <div className="flex justify-end">
+                    <button onClick={() => (showEquipForm ? cancelEquipForm() : startAddEquip())} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> بند أعمال معدات جديد</button>
+                  </div>
+                  {showEquipForm && (
+                    <form onSubmit={submitEquip} className="p-4 rounded-lg space-y-3" style={{ background: COLORS.cream }}>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <Field label="كود المعدة" required>
+                          <TextInput list="equip-codes" value={equipForm.equipmentCode} onChange={handleEquipCodeChange} required placeholder="اختر أو اكتب" />
+                          <datalist id="equip-codes">{codeOptions.map((c) => <option key={c.display} value={c.display} />)}</datalist>
+                        </Field>
+                        <Field label="النوع"><TextInput value={equipForm.equipmentType} onChange={setEq("equipmentType")} /></Field>
+                        <Field label="الماركة"><TextInput value={equipForm.brand} onChange={setEq("brand")} /></Field>
+                        <Field label="موقع العمل"><TextInput value={equipForm.location} onChange={setEq("location")} /></Field>
+                        <Field label="الأجر الشهري" required><TextInput type="number" step="0.01" value={equipForm.monthlyRate} onChange={setEq("monthlyRate")} required placeholder="0" /></Field>
+                        <Field label="عدد ساعات العمل" required><TextInput type="number" step="0.01" value={equipForm.hoursWorked} onChange={setEq("hoursWorked")} required placeholder="0" /></Field>
+                        <div className="md:col-span-3"><Field label="ملاحظات"><TextInput value={equipForm.notes} onChange={setEq("notes")} /></Field></div>
+                      </div>
+                      <div className="flex items-center justify-between pt-2">
+                        <div className="text-sm" style={{ color: COLORS.slate }}>الأجر بالساعة: <b style={{ color: COLORS.ink }}>{fmtMoney(equipHourlyPreview)}</b> — الإجمالي: <b style={{ color: COLORS.ink }}>{fmtMoney(equipTotalPreview)}</b></div>
+                        <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingEquipId ? "حفظ التعديل" : "حفظ"}</button>
+                      </div>
+                    </form>
+                  )}
+                  <SectionCard title={`أعمال المعدات (${claimEquip.length}) — ${fmtMoney(selTotals.equipT)}`}>
+                    {claimEquip.length === 0 ? <EmptyState icon={ClipboardList} title="لا توجد بنود مسجّلة" /> : (
+                      <div className="overflow-x-auto -mx-5">
+                        <table className="w-full text-sm">
+                          <thead><tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>{["كود المعدة", "النوع", "الماركة", "الموقع", "الأجر الشهري", "أجر الساعة", "الساعات", "الإجمالي", "ملاحظات", ""].map((h) => <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimEquip.map((c) => (
+                              <tr key={c.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                                <td className="px-3 py-2.5 font-semibold whitespace-nowrap">{c.equipmentCode}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{c.equipmentType || "—"}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{c.brand || "—"}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{c.location || "—"}</td>
+                                <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.monthlyRate)}</td>
+                                <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtMoney(c.hourlyRate)}</td>
+                                <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{fmtNum(c.hoursWorked)}</td>
+                                <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(c.total)}</td>
+                                <td className="px-3 py-2.5">{c.notes || "—"}</td>
+                                <td className="px-3 py-2.5"><div className="flex gap-1"><button onClick={() => startEditEquip(c)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button><button onClick={() => onDeleteClaim(c.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button></div></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
+              )}
+
+              {entryTab === "other" && (
+                <div className="no-print space-y-3">
+                  <div className="flex justify-end">
+                    <button onClick={() => (showOtherForm ? cancelOtherForm() : startAddOther())} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> بند جديد</button>
+                  </div>
+                  {showOtherForm && (
+                    <form onSubmit={submitOther} className="p-4 rounded-lg space-y-3" style={{ background: COLORS.cream }}>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                        <Field label="موقع العمل" required><TextInput value={otherForm.location} onChange={setO("location")} required /></Field>
+                        <div className="md:col-span-2"><Field label="البيان" required><TextInput value={otherForm.description} onChange={setO("description")} required /></Field></div>
+                        <Field label="التكلفة" required><TextInput type="number" step="0.01" value={otherForm.cost} onChange={setO("cost")} required placeholder="0" /></Field>
+                        <div className="md:col-span-4"><Field label="ملاحظات"><TextInput value={otherForm.notes} onChange={setO("notes")} /></Field></div>
+                      </div>
+                      <div className="flex justify-end pt-2">
+                        <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingOtherId ? "حفظ التعديل" : "حفظ"}</button>
+                      </div>
+                    </form>
+                  )}
+                  <SectionCard title={`أعمال أخرى (${claimOther.length}) — ${fmtMoney(selTotals.otherT)}`}>
+                    {claimOther.length === 0 ? <EmptyState icon={ClipboardList} title="لا توجد بنود مسجّلة" /> : (
+                      <div className="overflow-x-auto -mx-5">
+                        <table className="w-full text-sm">
+                          <thead><tr style={{ background: `linear-gradient(90deg, ${COLORS.navy}, ${COLORS.navyLight})` }}>{["موقع العمل", "البيان", "التكلفة", "ملاحظات", ""].map((h) => <th key={h} className="px-3 py-2.5 text-right text-xs font-bold whitespace-nowrap" style={{ color: "rgba(255,255,255,0.88)" }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimOther.map((o) => (
+                              <tr key={o.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                                <td className="px-3 py-2.5 whitespace-nowrap">{o.location}</td>
+                                <td className="px-3 py-2.5">{o.description}</td>
+                                <td className="px-3 py-2.5 tabular-nums font-bold whitespace-nowrap">{fmtMoney(o.cost)}</td>
+                                <td className="px-3 py-2.5">{o.notes || "—"}</td>
+                                <td className="px-3 py-2.5"><div className="flex gap-1"><button onClick={() => startEditOther(o)} className="p-1.5 rounded-md hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={13} /></button><button onClick={() => onDeleteOtherWork(o.id)} className="p-1.5 rounded-md hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={13} /></button></div></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
+              )}
+
+              {entryTab === "deductions" && (
+                <div className="no-print space-y-3">
+                  <div className="flex justify-end">
+                    <button onClick={() => (showDedForm ? cancelDedForm() : startAddDed())} className="px-3 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: COLORS.border, color: COLORS.ink }}><Plus size={13} className="inline -mt-0.5" /> استقطاع جديد</button>
+                  </div>
+                  {showDedForm && (
+                    <form onSubmit={submitDed} className="p-4 rounded-lg space-y-3" style={{ background: COLORS.cream }}>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                        <Field label="نوع الاستقطاع" required><Select value={dedForm.type} onChange={setD("type")}>{CLAIM_DEDUCTION_TYPES.map((t) => <option key={t}>{t}</option>)}</Select></Field>
+                        <Field label="الوصف"><TextInput value={dedForm.description} onChange={setD("description")} /></Field>
+                        <Field label="المبلغ" required><TextInput type="number" step="0.01" value={dedForm.amount} onChange={setD("amount")} required placeholder="0" /></Field>
+                      </div>
+                      <div className="flex justify-end pt-2">
+                        <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white" style={{ background: COLORS.gold, color: COLORS.navy }}>{editingDedId ? "حفظ التعديل" : "حفظ"}</button>
+                      </div>
+                    </form>
+                  )}
+                  <SectionCard title={`الاستقطاعات (${claimDeds.length}) — ${fmtMoney(selTotals.dedT)}`}>
+                    {claimDeds.length === 0 ? <EmptyState icon={ClipboardList} title="لا توجد استقطاعات مسجّلة" /> : (
+                      <div className="space-y-1.5">
+                        {claimDeds.map((d) => (
+                          <div key={d.id} className="flex items-center justify-between text-sm py-1.5 border-t" style={{ borderColor: COLORS.border }}>
+                            <span>{d.type} {d.description ? `— ${d.description}` : ""}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold tabular-nums">{fmtMoney(d.amount)}</span>
+                              <button onClick={() => startEditDed(d)} className="p-1 rounded hover:bg-black/5" style={{ color: COLORS.slate }}><Pencil size={12} /></button>
+                              <button onClick={() => onDeleteDeduction(d.id)} className="p-1 rounded hover:bg-red-50" style={{ color: COLORS.danger }}><Trash2 size={12} /></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+                </div>
+              )}
+
+              {/* ============ منطقة الطباعة ============ */}
+              <div id="print-area">
+                <PrintLetterhead />
+                {printMode === "byLocation" && printLocation && (
+                  <>
+                    <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 4 }}>بيان أعمال — {printLocation}</h2>
+                    <p style={{ textAlign: "center", marginBottom: 16, fontSize: 13 }}>مستخلص رقم {selectedHeader.claimNumber} — {selectedHeader.client} — {selectedHeader.periodFrom} → {selectedHeader.periodTo}</p>
+
+                    {claimEquip.filter((c) => c.location === printLocation).length > 0 && (
+                      <>
+                        <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>أعمال المعدات</h3>
+                        <table style={{ marginBottom: 16 }}>
+                          <thead><tr>{["كود المعدة", "النوع", "الأجر الشهري", "أجر الساعة", "الساعات", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimEquip.filter((c) => c.location === printLocation).map((c) => (
+                              <tr key={c.id}><td>{c.equipmentCode}</td><td>{c.equipmentType || "—"}</td><td>{fmtMoney(c.monthlyRate)}</td><td>{fmtMoney(c.hourlyRate)}</td><td>{fmtNum(c.hoursWorked)}</td><td>{fmtMoney(c.total)}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
+                    {claimMissions.filter((m) => m.location === printLocation).length > 0 && (
+                      <>
+                        <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>مأموريات السيارات</h3>
+                        <table style={{ marginBottom: 16 }}>
+                          <thead><tr>{["التاريخ", "كود السيارة", "المأمورية", "النقل", "كارتات وموازين", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimMissions.filter((m) => m.location === printLocation).map((m) => (
+                              <tr key={m.id}><td>{m.date}</td><td>{m.vehicleCode}</td><td>{m.missionDescription || "—"}</td><td>{fmtMoney(m.transportCost)}</td><td>{fmtMoney(m.cardsScalesFees)}</td><td>{fmtMoney(m.total)}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
+                    {claimOther.filter((o) => o.location === printLocation).length > 0 && (
+                      <>
+                        <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>أعمال أخرى</h3>
+                        <table style={{ marginBottom: 16 }}>
+                          <thead><tr>{["البيان", "التكلفة", "ملاحظات"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {claimOther.filter((o) => o.location === printLocation).map((o) => (
+                              <tr key={o.id}><td>{o.description}</td><td>{fmtMoney(o.cost)}</td><td>{o.notes || "—"}</td></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
+                    <table>
+                      <tbody><tr style={{ fontWeight: "bold" }}><td>إجمالي مستحقات الموقع</td><td>{fmtMoney(byLocationSummary.find((r) => r.location === printLocation)?.total || 0)}</td></tr></tbody>
+                    </table>
+
+                    <div className="totals-signatures-block grid grid-cols-2 gap-6 mt-8 pt-4" style={{ display: "grid" }}>
+                      <div className="text-center"><div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} /><div className="font-bold text-[10px]">مدير قسم الصيانة والتشغيل</div></div>
+                      <div className="text-center"><div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} /><div className="font-bold text-[10px]">مدير الموقع — للاعتماد</div></div>
+                    </div>
+                  </>
+                )}
+
+                {printMode === "cover" && (
+                  <>
+                    <h2 style={{ fontFamily: "Cairo", textAlign: "center", marginBottom: 4 }}>مستخلص رقم {selectedHeader.claimNumber}</h2>
+                    <p style={{ textAlign: "center", marginBottom: 16, fontSize: 13 }}>{selectedHeader.client} — {selectedHeader.periodFrom} → {selectedHeader.periodTo}</p>
+
+                    <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>أولاً — بيان الإيرادات موزّعة على المواقع</h3>
+                    <table style={{ marginBottom: 16 }}>
+                      <thead><tr>{["الموقع", "أعمال معدات", "مأموريات سيارات", "أعمال أخرى", "الإجمالي"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {byLocationSummary.map((r) => (
+                          <tr key={r.location}><td>{r.location}</td><td>{fmtMoney(r.equipment)}</td><td>{fmtMoney(r.missions)}</td><td>{fmtMoney(r.other)}</td><td style={{ fontWeight: "bold" }}>{fmtMoney(r.total)}</td></tr>
+                        ))}
+                        <tr style={{ fontWeight: "bold", background: "#F3EEDD" }}><td colSpan={4}>إجمالي الاستحقاقات</td><td>{fmtMoney(selTotals.gross)}</td></tr>
+                      </tbody>
+                    </table>
+
+                    <h3 style={{ fontFamily: "Cairo", marginBottom: 6 }}>ثانياً — بنود الاستقطاعات</h3>
+                    <table style={{ marginBottom: 16 }}>
+                      <thead><tr>{["نوع الاستقطاع", "البيان", "المبلغ"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {claimDeds.map((d) => (
+                          <tr key={d.id}><td>{d.type}</td><td>{d.description || "—"}</td><td>{fmtMoney(d.amount)}</td></tr>
+                        ))}
+                        <tr style={{ fontWeight: "bold", background: "#F3EEDD" }}><td colSpan={2}>إجمالي الاستقطاعات</td><td>{fmtMoney(selTotals.dedT)}</td></tr>
+                      </tbody>
+                    </table>
+
+                    <table>
+                      <tbody><tr style={{ fontWeight: "bold", background: "#101A2E", color: "white" }}><td>الصافي المستحق صرفه</td><td>{fmtMoney(selTotals.net)}</td></tr></tbody>
+                    </table>
+
+                    <div className="totals-signatures-block grid grid-cols-4 gap-6 mt-8 pt-4" style={{ display: "grid" }}>
+                      {SIGNATURES.map((s) => (
+                        <div key={s} className="text-center"><div className="border-b pb-8 mb-1" style={{ borderColor: "#101A2E" }} /><div className="font-bold text-[10px]" style={{ color: "#5B6579" }}>{s}</div></div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
