@@ -1511,10 +1511,8 @@ export default function App() {
       group: "المالية",
       items: [
         { key: "custodyHub", label: "العهد والصرف", icon: ClipboardList },
+        { key: "treasuryHub", label: "خزينة القسم", icon: Building2 },
         { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
-        { key: "departmentBank", label: "بنك القسم", icon: Building2 },
-        { key: "disbursementRequests", label: "طلبات الصرف", icon: FileSpreadsheet },
-        { key: "octaneWallet", label: "محفظة أوكتين (سولار)", icon: Fuel },
         { key: "analysis", label: "تحليل المصروفات", icon: BarChart3 },
         { key: "revenueAnalysis", label: "تحليل الإيرادات", icon: TrendingUp },
         { key: "companyComparison", label: "مقارنة الشركتين", icon: BarChart3 },
@@ -1530,21 +1528,16 @@ export default function App() {
     {
       group: "المعدات",
       items: [
-        { key: "equipment", label: "بطاقة أداء المعدات", icon: Wrench },
-        { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
-        { key: "equipmentComparison", label: "مقارنة المعدات المتشابهة", icon: BarChart3 },
+        { key: "equipmentHub", label: "المعدات", icon: Wrench },
         { key: "maintenanceLog", label: "سجل الصيانة", icon: ListChecks },
-        { key: "fuel", label: "السولار", icon: Fuel },
-        { key: "oils", label: "الزيوت والفلاتر", icon: Wrench },
-        { key: "fuelAnalysis", label: "تحليل السولار", icon: BarChart3 },
+        { key: "consumablesHub", label: "مستهلكات", icon: Fuel },
         { key: "equipmentCodes", label: "أكواد المعدات", icon: ListChecks },
       ],
     },
     {
       group: "الإدارة",
       items: [
-        { key: "salaries", label: "المرتبات", icon: Wallet },
-        { key: "employees", label: "الموظفين", icon: ClipboardList },
+        { key: "adminHub", label: "شئون إدارية", icon: Wallet },
         { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
         { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
         { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
@@ -1810,25 +1803,41 @@ export default function App() {
                 onAddOtherWork={addClaimOtherWork} onUpdateOtherWork={updateClaimOtherWork} onDeleteOtherWork={deleteClaimOtherWork}
               />
             )}
-            {view === "departmentBank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={addBankTransaction} onDelete={deleteBankTransaction} />}
-            {view === "disbursementRequests" && <DisbursementRequestsView requests={disbursementRequests} onAdd={addDisbursementRequest} onUpdate={updateDisbursementRequest} onDelete={deleteDisbursementRequest} onToggleExecuted={markDisbursementExecuted} userEmail={authUser && authUser.email} />}
+            {view === "treasuryHub" && (
+              <TreasuryHubView
+                bankTransactions={bankTransactions} onAddBankTx={addBankTransaction} onDeleteBankTx={deleteBankTransaction}
+                requests={disbursementRequests} onAddRequest={addDisbursementRequest} onUpdateRequest={updateDisbursementRequest} onDeleteRequest={deleteDisbursementRequest} onToggleExecuted={markDisbursementExecuted}
+                userEmail={authUser && authUser.email}
+              />
+            )}
             {view === "contractingDept" && <ContractingDeptView contractors={contractors} clientEntries={contractingClientEntries} contractorEntries={contractingContractorEntries} bank={contractingBank} onAddContractor={addContractor} onUpdateContractor={updateContractor} onDeleteContractor={deleteContractor} onAddClientEntry={addContractingClientEntry} onDeleteClientEntry={deleteContractingClientEntry} onAddContractorEntry={addContractingContractorEntry} onDeleteContractorEntry={deleteContractingContractorEntry} onAddBankTx={addContractingBankTx} onDeleteBankTx={deleteContractingBankTx} />}
-            {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
-            {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
-            {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
-            {view === "equipmentComparison" && <EquipmentComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
+            {view === "equipmentHub" && (
+              <EquipmentHubView
+                expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes}
+              />
+            )}
             {view === "maintenanceLog" && <MaintenanceLogView expenses={expenses} />}
-            {view === "fuel" && <FuelView records={fuelRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addFuelRecord} onDelete={deleteFuelRecord} onImport={bulkImportFuel} />}
-            {view === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={addOilRecord} onDelete={deleteOilRecord} onImport={bulkImportOils} />}
-            {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
+            {view === "consumablesHub" && (
+              <ConsumablesHubView
+                fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses}
+                onAddFuel={addFuelRecord} onDeleteFuel={deleteFuelRecord} onImportFuel={bulkImportFuel}
+                onAddOil={addOilRecord} onDeleteOil={deleteOilRecord} onImportOil={bulkImportOils}
+                octaneTopUps={octaneTopUps} onAddOctaneTopUp={addOctaneTopUp} onDeleteOctaneTopUp={deleteOctaneTopUp}
+              />
+            )}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
-            {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
+            {view === "adminHub" && (
+              <AdminHubView
+                salaries={salaries} onAddSalary={addSalary} onUpdateSalary={updateSalary} onDeleteSalary={deleteSalary}
+                employees={employees} onAddEmployee={addEmployee} onUpdateEmployee={updateEmployee} onDeleteEmployee={deleteEmployee} onImportEmployees={bulkImportEmployees}
+                equipmentCodes={equipmentCodes}
+              />
+            )}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
-            {view === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={addEmployee} onUpdate={updateEmployee} onDelete={deleteEmployee} onImport={bulkImportEmployees} />}
             {view === "auditLog" && <AuditLogView log={auditLog} />}
           </div>
         )}
@@ -1888,17 +1897,12 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "accounting", label: "المحاسبة", desc: "دليل حسابات، قيود مزدوجة تلقائية، دفتر أستاذ، وميزان مراجعة", icon: BookOpen, color: "#2E5A8C" },
     { key: "custodyHub", label: "العهد والصرف", desc: "العهد، إدخال بند صرف، قاعدة البيانات، وطباعة عهدة — كلهم في مكان واحد", icon: ClipboardList, color: "#647085" },
     { key: "claims", label: "المستخلصات", desc: "استحقاقات واستقطاعات وصافي — بأربع صور حسب مالك المعدة والجهة الشغالة عندها", icon: FileSpreadsheet, color: "#8B9C6E" },
-    { key: "departmentBank", label: "بنك القسم", desc: "رصيد كل شركة لوحدها — صافي المستخلصات الداخلة والعهد الخارجة", icon: Building2, color: "#1C2C4A" },
-    { key: "disbursementRequests", label: "طلبات الصرف", desc: "طلب صرف جديد، اعتماد التنفيذ، وطباعة إذن الصرف", icon: FileSpreadsheet, color: "#8A5A00" },
-    { key: "octaneWallet", label: "محفظة أوكتين", desc: "شحن ومتابعة رصيد محفظة السولار والكارتات", icon: Fuel, color: "#00838F" },
-    { key: "equipment", label: "بطاقة أداء المعدات", desc: "تكلفة وربحية كل معدة وسيارة", icon: Wrench, color: "#6A4A2E" },
-    { key: "profitability", label: "ربحية المعدات", desc: "صافي ربح كل معدة شامل التكلفة الموزّعة", icon: TrendingUp, color: "#1B5E20" },
+    { key: "treasuryHub", label: "خزينة القسم", desc: "بنك القسم وطلبات الصرف في مكان واحد", icon: Building2, color: "#1C2C4A" },
+    { key: "equipmentHub", label: "المعدات", desc: "بطاقة الأداء، الربحية، ومقارنة المعدات المتشابهة", icon: Wrench, color: "#6A4A2E" },
     { key: "maintenanceLog", label: "سجل الصيانة", desc: "كل تاريخ صيانة معدة معينة بالتفصيل", icon: ListChecks, color: "#4A5568" },
-    { key: "fuel", label: "السولار", desc: "سجل تفصيلي لاستهلاك السولار + استيراد وتصدير وطباعة", icon: Fuel, color: "#00838F" },
-    { key: "oils", label: "الزيوت والفلاتر", desc: "مسحوبات الزيوت والفلاتر، محمّلة كمصروف مباشر على المعدات", icon: Wrench, color: "#6D4C41" },
-    { key: "fuelAnalysis", label: "تحليل السولار", desc: "معدل الاستهلاك، التكلفة، والاتجاه الشهري", icon: BarChart3, color: "#00695C" },
+    { key: "consumablesHub", label: "مستهلكات", desc: "السولار، الزيوت والفلاتر، محفظة أوكتين، وتحليل السولار", icon: Fuel, color: "#00838F" },
     { key: "equipmentCodes", label: "أكواد المعدات", desc: "قائمة مرجعية بكل المعدات ومالكها وموقعها", icon: ListChecks, color: "#6A4A2E" },
-    { key: "salaries", label: "المرتبات", desc: "مرتبات سائقين (مباشرة على المعدات) ومشرفين ومحاسبين (موزّعة)", icon: Wallet, color: "#5B4A8A" },
+    { key: "adminHub", label: "شئون إدارية", desc: "المرتبات والموظفين في مكان واحد", icon: Wallet, color: "#5B4A8A" },
     { key: "alerts", label: "تنبيهات ومراجعة", desc: "عهد بعجز، صيانة متأخرة، وجودة البيانات", icon: AlertTriangle, color: COLORS.danger },
     { key: "import", label: "استيراد من إكسل", desc: "ارفع ملف واستورد كل بياناتك دفعة واحدة", icon: UploadCloud, color: "#1565C0" },
     { key: "export", label: "تصدير البيانات", desc: "نزّل كل بياناتك في ملف إكسل منظم", icon: FileSpreadsheet, color: "#455A64" },
@@ -2264,6 +2268,108 @@ function EntryForm({ custodies, custodyTotals, expenses, equipmentCodes, onAdd, 
    العهد والصرف — تاب موحّد بيلمّ (العهد / إدخال بند صرف / قاعدة البيانات / طباعة عهدة)
    في مكان واحد بتنقل داخلي، بدل ما يكونوا 4 عناصر منفصلة في القايمة الجانبية
 ============================================================ */
+/* ============================================================
+   خزينة القسم — بنك القسم + طلبات الصرف في مكان واحد
+============================================================ */
+function TreasuryHubView({ bankTransactions, onAddBankTx, onDeleteBankTx, requests, onAddRequest, onUpdateRequest, onDeleteRequest, onToggleExecuted, userEmail }) {
+  const [tab, setTab] = useState("bank"); // bank | requests
+  const TABS = [
+    { key: "bank", label: "بنك القسم", icon: Building2 },
+    { key: "requests", label: "طلبات الصرف", icon: FileSpreadsheet },
+  ];
+  return (
+    <div className="space-y-6">
+      <div className="no-print flex flex-wrap gap-1.5 p-1.5 rounded-2xl w-fit" style={{ background: COLORS.navy }}>
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition" style={{ background: tab === t.key ? COLORS.gold : "transparent", color: tab === t.key ? COLORS.navy : "rgba(255,255,255,0.75)" }}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "bank" && <DepartmentBankView bankTransactions={bankTransactions} onAdd={onAddBankTx} onDelete={onDeleteBankTx} />}
+      {tab === "requests" && <DisbursementRequestsView requests={requests} onAdd={onAddRequest} onUpdate={onUpdateRequest} onDelete={onDeleteRequest} onToggleExecuted={onToggleExecuted} userEmail={userEmail} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   مستهلكات — السولار + الزيوت والفلاتر + محفظة أوكتين + تحليل السولار
+============================================================ */
+function ConsumablesHubView({ fuelRecords, oilRecords, equipmentCodes, expenses, onAddFuel, onDeleteFuel, onImportFuel, onAddOil, onDeleteOil, onImportOil, octaneTopUps, onAddOctaneTopUp, onDeleteOctaneTopUp }) {
+  const [tab, setTab] = useState("fuel"); // fuel | oils | octane | analysis
+  const TABS = [
+    { key: "fuel", label: "السولار", icon: Fuel },
+    { key: "oils", label: "الزيوت والفلاتر", icon: Wrench },
+    { key: "octane", label: "محفظة أوكتين", icon: Fuel },
+    { key: "analysis", label: "تحليل السولار", icon: BarChart3 },
+  ];
+  return (
+    <div className="space-y-6">
+      <div className="no-print flex flex-wrap gap-1.5 p-1.5 rounded-2xl w-fit" style={{ background: COLORS.navy }}>
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition" style={{ background: tab === t.key ? COLORS.gold : "transparent", color: tab === t.key ? COLORS.navy : "rgba(255,255,255,0.75)" }}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "fuel" && <FuelView records={fuelRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={onAddFuel} onDelete={onDeleteFuel} onImport={onImportFuel} />}
+      {tab === "oils" && <OilsView records={oilRecords} equipmentCodes={equipmentCodes} expenses={expenses} onAdd={onAddOil} onDelete={onDeleteOil} onImport={onImportOil} />}
+      {tab === "octane" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={onAddOctaneTopUp} onDelete={onDeleteOctaneTopUp} />}
+      {tab === "analysis" && <FuelAnalysisView records={fuelRecords} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   شئون إدارية — المرتبات + الموظفين
+============================================================ */
+function AdminHubView({ salaries, onAddSalary, onUpdateSalary, onDeleteSalary, employees, onAddEmployee, onUpdateEmployee, onDeleteEmployee, onImportEmployees, equipmentCodes }) {
+  const [tab, setTab] = useState("salaries"); // salaries | employees
+  const TABS = [
+    { key: "salaries", label: "المرتبات", icon: Wallet },
+    { key: "employees", label: "الموظفين", icon: ClipboardList },
+  ];
+  return (
+    <div className="space-y-6">
+      <div className="no-print flex flex-wrap gap-1.5 p-1.5 rounded-2xl w-fit" style={{ background: COLORS.navy }}>
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition" style={{ background: tab === t.key ? COLORS.gold : "transparent", color: tab === t.key ? COLORS.navy : "rgba(255,255,255,0.75)" }}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={onAddSalary} onUpdate={onUpdateSalary} onDelete={onDeleteSalary} /></SalariesGate>}
+      {tab === "employees" && <EmployeesView employees={employees} equipmentCodes={equipmentCodes} onAdd={onAddEmployee} onUpdate={onUpdateEmployee} onDelete={onDeleteEmployee} onImport={onImportEmployees} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   المعدات — بطاقة أداء المعدات + ربحية المعدات + مقارنة المعدات المتشابهة
+============================================================ */
+function EquipmentHubView({ expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes }) {
+  const [tab, setTab] = useState("performance"); // performance | profitability | comparison
+  const TABS = [
+    { key: "performance", label: "بطاقة أداء المعدات", icon: Wrench },
+    { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
+    { key: "comparison", label: "مقارنة المعدات المتشابهة", icon: BarChart3 },
+  ];
+  return (
+    <div className="space-y-6">
+      <div className="no-print flex flex-wrap gap-1.5 p-1.5 rounded-2xl w-fit" style={{ background: COLORS.navy }}>
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition" style={{ background: tab === t.key ? COLORS.gold : "transparent", color: tab === t.key ? COLORS.navy : "rgba(255,255,255,0.75)" }}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "performance" && <EquipmentView expenses={expenses} revenues={revenues} />}
+      {tab === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
+      {tab === "comparison" && <EquipmentComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
+    </div>
+  );
+}
+
 function CustodyHubView({ custodies, custodyTotals, expenses, equipmentCodes, onAddExpense, onAddCustody, onUpdateCustody, onDeleteCustody, onDeleteExpense, onUpdateExpense, userEmail }) {
   const [tab, setTab] = useState("custodies"); // custodies | entry | database | print
   const TABS = [
