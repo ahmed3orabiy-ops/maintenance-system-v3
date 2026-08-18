@@ -1510,9 +1510,7 @@ export default function App() {
     {
       group: "المالية",
       items: [
-        { key: "custodies", label: "العهد", icon: ClipboardList },
-        { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
-        { key: "database", label: "قاعدة البيانات", icon: Database },
+        { key: "custodyHub", label: "العهد والصرف", icon: ClipboardList },
         { key: "claims", label: "المستخلصات", icon: FileSpreadsheet },
         { key: "departmentBank", label: "بنك القسم", icon: Building2 },
         { key: "disbursementRequests", label: "طلبات الصرف", icon: FileSpreadsheet },
@@ -1547,7 +1545,6 @@ export default function App() {
       items: [
         { key: "salaries", label: "المرتبات", icon: Wallet },
         { key: "employees", label: "الموظفين", icon: ClipboardList },
-        { key: "print", label: "طباعة عهدة", icon: Printer },
         { key: "alerts", label: "تنبيهات ومراجعة", icon: AlertTriangle },
         { key: "import", label: "استيراد من إكسل", icon: UploadCloud },
         { key: "export", label: "تصدير البيانات", icon: FileSpreadsheet },
@@ -1795,7 +1792,13 @@ export default function App() {
             {view === "dashboard" && <Dashboard expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "analysis" && <AnalysisView expenses={expenses} custodies={custodies} custodyTotals={custodyTotals} />}
             {view === "revenueAnalysis" && <RevenueAnalysisView revenues={revenues} expenses={expenses} />}
-            {view === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={addExpense} onGoCustodies={() => setView("custodies")} />}
+            {view === "custodyHub" && (
+              <CustodyHubView
+                custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes}
+                onAddExpense={addExpense} onAddCustody={addCustody} onUpdateCustody={updateCustody} onDeleteCustody={deleteCustody}
+                onDeleteExpense={deleteExpense} onUpdateExpense={updateExpense} userEmail={authUser && authUser.email}
+              />
+            )}
             {view === "claims" && (
               <ClaimsView
                 claimHeaders={claimHeaders} claims={claims} claimDeductions={claimDeductions} vehicleMissions={vehicleMissions} claimOtherWorks={claimOtherWorks}
@@ -1813,8 +1816,6 @@ export default function App() {
             {view === "octaneWallet" && <OctaneWalletView octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} onAdd={addOctaneTopUp} onDelete={deleteOctaneTopUp} />}
             {view === "companyComparison" && <CompanyComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} claims={claims} employees={employees} />}
             {view === "accounting" && <AccountingView custodies={custodies} expenses={expenses} claims={claims} claimDeductions={claimDeductions} octaneTopUps={octaneTopUps} fuelRecords={fuelRecords} equipmentCodes={equipmentCodes} accounts={accounts} manualJournalEntries={manualJournalEntries} fiscalClosings={fiscalClosings} onAddAccount={addAccount} onUpdateAccount={updateAccount} onDeleteAccount={deleteAccount} onAddManualEntry={addManualJournalEntry} onDeleteManualEntry={deleteManualJournalEntry} onCloseFiscalPeriod={closeFiscalPeriod} />}
-            {view === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={addCustody} onUpdate={updateCustody} onDelete={deleteCustody} />}
-            {view === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={deleteExpense} onUpdate={updateExpense} />}
             {view === "equipment" && <EquipmentView expenses={expenses} revenues={revenues} />}
             {view === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
             {view === "equipmentComparison" && <EquipmentComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
@@ -1824,7 +1825,6 @@ export default function App() {
             {view === "fuelAnalysis" && <FuelAnalysisView records={fuelRecords} />}
             {view === "equipmentCodes" && <EquipmentCodesView codes={equipmentCodes} expenses={expenses} fuelRecords={fuelRecords} oilRecords={oilRecords} revenues={revenues} onAdd={addEquipmentCode} onUpdate={updateEquipmentCode} onDelete={deleteEquipmentCode} onImport={bulkImportEquipmentCodes} onMerge={mergeCodeSpellings} onMoveToTop={moveEquipmentCodeToTop} />}
             {view === "salaries" && <SalariesGate><SalariesView salaries={salaries} equipmentCodes={equipmentCodes} onAdd={addSalary} onUpdate={updateSalary} onDelete={deleteSalary} /></SalariesGate>}
-            {view === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} userEmail={authUser && authUser.email} />}
             {view === "alerts" && <AlertsView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} revenues={revenues} salaries={salaries} onUpdateExpenseLoaded={updateExpenseLoaded} onUpdateSalaryLoaded={updateSalaryLoaded} />}
             {view === "import" && <ImportView onImport={bulkImport} existingCounts={{ custodies: custodies.length, expenses: expenses.length }} />}
             {view === "export" && <ExportView expenses={expenses} custodies={custodies} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} salaries={salaries} subCustodies={subCustodies} subCustodyClearances={subCustodyClearances} auditLog={auditLog} employees={employees} claims={claims} />}
@@ -1886,13 +1886,11 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "analysis", label: "تحليل المصروفات", desc: "المواقع، الاتجاه الزمني، ومقارنة العهد", icon: BarChart3, color: "#2E7A50" },
     { key: "revenueAnalysis", label: "تحليل الإيرادات", desc: "أداء الإيراد لكل معدة وجهة مستأجرة", icon: TrendingUp, color: COLORS.gold },
     { key: "accounting", label: "المحاسبة", desc: "دليل حسابات، قيود مزدوجة تلقائية، دفتر أستاذ، وميزان مراجعة", icon: BookOpen, color: "#2E5A8C" },
-    { key: "entry", label: "إدخال بند صرف", desc: "سجّل معاملة مصروف جديدة", icon: FilePlus2, color: "#5B7A9E" },
+    { key: "custodyHub", label: "العهد والصرف", desc: "العهد، إدخال بند صرف، قاعدة البيانات، وطباعة عهدة — كلهم في مكان واحد", icon: ClipboardList, color: "#647085" },
     { key: "claims", label: "المستخلصات", desc: "استحقاقات واستقطاعات وصافي — بأربع صور حسب مالك المعدة والجهة الشغالة عندها", icon: FileSpreadsheet, color: "#8B9C6E" },
     { key: "departmentBank", label: "بنك القسم", desc: "رصيد كل شركة لوحدها — صافي المستخلصات الداخلة والعهد الخارجة", icon: Building2, color: "#1C2C4A" },
     { key: "disbursementRequests", label: "طلبات الصرف", desc: "طلب صرف جديد، اعتماد التنفيذ، وطباعة إذن الصرف", icon: FileSpreadsheet, color: "#8A5A00" },
     { key: "octaneWallet", label: "محفظة أوكتين", desc: "شحن ومتابعة رصيد محفظة السولار والكارتات", icon: Fuel, color: "#00838F" },
-    { key: "custodies", label: "العهد", desc: "إدارة عهد الصرف لكل جهة", icon: ClipboardList, color: "#647085" },
-    { key: "database", label: "قاعدة البيانات", desc: "كل بنود الصرف قابلة للبحث والفلترة", icon: Database, color: "#1C2C4A" },
     { key: "equipment", label: "بطاقة أداء المعدات", desc: "تكلفة وربحية كل معدة وسيارة", icon: Wrench, color: "#6A4A2E" },
     { key: "profitability", label: "ربحية المعدات", desc: "صافي ربح كل معدة شامل التكلفة الموزّعة", icon: TrendingUp, color: "#1B5E20" },
     { key: "maintenanceLog", label: "سجل الصيانة", desc: "كل تاريخ صيانة معدة معينة بالتفصيل", icon: ListChecks, color: "#4A5568" },
@@ -1901,7 +1899,6 @@ function HomeView({ expenses, custodies, revenues, custodyTotals, fuelRecords, o
     { key: "fuelAnalysis", label: "تحليل السولار", desc: "معدل الاستهلاك، التكلفة، والاتجاه الشهري", icon: BarChart3, color: "#00695C" },
     { key: "equipmentCodes", label: "أكواد المعدات", desc: "قائمة مرجعية بكل المعدات ومالكها وموقعها", icon: ListChecks, color: "#6A4A2E" },
     { key: "salaries", label: "المرتبات", desc: "مرتبات سائقين (مباشرة على المعدات) ومشرفين ومحاسبين (موزّعة)", icon: Wallet, color: "#5B4A8A" },
-    { key: "print", label: "طباعة عهدة", desc: "نموذج تصفية عهدة رسمي جاهز للطباعة", icon: Printer, color: "#9C7A1E" },
     { key: "alerts", label: "تنبيهات ومراجعة", desc: "عهد بعجز، صيانة متأخرة، وجودة البيانات", icon: AlertTriangle, color: COLORS.danger },
     { key: "import", label: "استيراد من إكسل", desc: "ارفع ملف واستورد كل بياناتك دفعة واحدة", icon: UploadCloud, color: "#1565C0" },
     { key: "export", label: "تصدير البيانات", desc: "نزّل كل بياناتك في ملف إكسل منظم", icon: FileSpreadsheet, color: "#455A64" },
@@ -2263,6 +2260,42 @@ function EntryForm({ custodies, custodyTotals, expenses, equipmentCodes, onAdd, 
 /* ============================================================
    العهد
 ============================================================ */
+/* ============================================================
+   العهد والصرف — تاب موحّد بيلمّ (العهد / إدخال بند صرف / قاعدة البيانات / طباعة عهدة)
+   في مكان واحد بتنقل داخلي، بدل ما يكونوا 4 عناصر منفصلة في القايمة الجانبية
+============================================================ */
+function CustodyHubView({ custodies, custodyTotals, expenses, equipmentCodes, onAddExpense, onAddCustody, onUpdateCustody, onDeleteCustody, onDeleteExpense, onUpdateExpense, userEmail }) {
+  const [tab, setTab] = useState("custodies"); // custodies | entry | database | print
+  const TABS = [
+    { key: "custodies", label: "العهد", icon: ClipboardList },
+    { key: "entry", label: "إدخال بند صرف", icon: FilePlus2 },
+    { key: "database", label: "قاعدة البيانات", icon: Database },
+    { key: "print", label: "طباعة عهدة", icon: Printer },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="no-print flex flex-wrap gap-1.5 p-1.5 rounded-2xl w-fit" style={{ background: COLORS.navy }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className="px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition"
+            style={{ background: tab === t.key ? COLORS.gold : "transparent", color: tab === t.key ? COLORS.navy : "rgba(255,255,255,0.75)" }}
+          >
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "custodies" && <Custodies custodies={custodies} custodyTotals={custodyTotals} onAdd={onAddCustody} onUpdate={onUpdateCustody} onDelete={onDeleteCustody} />}
+      {tab === "entry" && <EntryForm custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} equipmentCodes={equipmentCodes} onAdd={onAddExpense} onGoCustodies={() => setTab("custodies")} />}
+      {tab === "database" && <DatabaseView expenses={expenses} custodies={custodies} equipmentCodes={equipmentCodes} onDelete={onDeleteExpense} onUpdate={onUpdateExpense} />}
+      {tab === "print" && <PrintView custodies={custodies} custodyTotals={custodyTotals} expenses={expenses} userEmail={userEmail} />}
+    </div>
+  );
+}
+
 function Custodies({ custodies, custodyTotals, onAdd, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
