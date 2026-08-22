@@ -2348,11 +2348,12 @@ function AdminHubView({ salaries, onAddSalary, onUpdateSalary, onDeleteSalary, e
    المعدات — بطاقة أداء المعدات + ربحية المعدات + مقارنة المعدات المتشابهة
 ============================================================ */
 function EquipmentHubView({ expenses, revenues, fuelRecords, oilRecords, salaries, equipmentCodes }) {
-  const [tab, setTab] = useState("performance"); // performance | profitability | comparison
+  const [tab, setTab] = useState("performance"); // performance | profitability | comparison | card
   const TABS = [
     { key: "performance", label: "بطاقة أداء المعدات", icon: Wrench },
     { key: "profitability", label: "ربحية المعدات", icon: TrendingUp },
     { key: "comparison", label: "مقارنة المعدات المتشابهة", icon: BarChart3 },
+    { key: "card", label: "بطاقة معدة", icon: ClipboardList },
   ];
   return (
     <div className="space-y-6">
@@ -2366,6 +2367,147 @@ function EquipmentHubView({ expenses, revenues, fuelRecords, oilRecords, salarie
       {tab === "performance" && <EquipmentView expenses={expenses} revenues={revenues} />}
       {tab === "profitability" && <ProfitabilityView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
       {tab === "comparison" && <EquipmentComparisonView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} salaries={salaries} equipmentCodes={equipmentCodes} />}
+      {tab === "card" && <EquipmentCardView expenses={expenses} revenues={revenues} fuelRecords={fuelRecords} oilRecords={oilRecords} equipmentCodes={equipmentCodes} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   بطاقة معدة واحدة — التكلفة مفصّلة: صرف من العهد / زيوت / فلاتر / سولار / إيراد / صافي
+============================================================ */
+function EquipmentCardView({ expenses, revenues, fuelRecords, oilRecords, equipmentCodes }) {
+  const allCodes = useMemo(() => {
+    const set = new Set();
+    equipmentCodes.forEach((c) => { if (c.code && !isCostPoolCode(c.code)) set.add(String(c.code)); });
+    expenses.forEach((e) => { if (e.equipmentCode && !isCostPoolCode(e.equipmentCode)) set.add(String(e.equipmentCode)); });
+    return [...set].sort();
+  }, [equipmentCodes, expenses]);
+
+  const [code, setCode] = useState(allCodes[0] || "");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const nc = normCode(code);
+  const inRange = (d) => (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
+
+  const meta = equipmentCodes.find((c) => normCode(c.code) === nc) || {};
+  const custodyItems = useMemo(() => expenses.filter((e) => normCode(e.equipmentCode) === nc && inRange(e.date)), [expenses, nc, dateFrom, dateTo]);
+  const fuelItems = useMemo(() => fuelRecords.filter((r) => normCode(r.code) === nc && inRange(r.date)), [fuelRecords, nc, dateFrom, dateTo]);
+  const oilItems = useMemo(() => oilRecords.filter((r) => normCode(r.equipmentCode) === nc && inRange(r.date)), [oilRecords, nc, dateFrom, dateTo]);
+  const revItems = useMemo(() => (revenues || []).filter((r) => normCode(r.equipmentCode) === nc && inRange(r.startMonth || r.month)), [revenues, nc, dateFrom, dateTo]);
+
+  const custodyTotal = custodyItems.reduce((s, e) => s + (Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0), 0);
+  const fuelTotal = fuelItems.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const oilsTotal = oilItems.filter((r) => oilCategory(r.itemType) === "زيوت").reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const filtersTotal = oilItems.filter((r) => oilCategory(r.itemType) === "فلاتر").reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const revTotal = revItems.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const totalCost = custodyTotal + fuelTotal + oilsTotal + filtersTotal;
+  const net = revTotal - totalCost;
+
+  const lastDate = [...custodyItems, ...fuelItems, ...oilItems].reduce((mx, r) => (r.date > mx ? r.date : mx), "");
+  const handlePrint = () => window.print();
+
+  const Box = ({ label, value, tone }) => (
+    <div className="p-3 rounded-xl text-center" style={{ background: tone === "navy" ? COLORS.navy : "white", border: tone === "navy" ? "none" : `1px solid ${COLORS.border}` }}>
+      <div className="text-[11px] font-bold mb-1" style={{ color: tone === "navy" ? "rgba(255,255,255,0.7)" : COLORS.slate }}>{label}</div>
+      <div className="font-extrabold tabular-nums" style={{ color: tone === "navy" ? "white" : COLORS.ink }}>{fmtMoney(value)}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <Header
+        title="بطاقة معدة واحدة"
+        sub="التكلفة الكاملة لمعدة واحدة مفصّلة: صرف من العهد، زيوت، فلاتر، سولار، إيراد، وصافي الربح"
+        action={
+          <button onClick={handlePrint} className="no-print px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2 border" style={{ borderColor: COLORS.border, color: COLORS.ink }}>
+            <Printer size={16} /> طباعة
+          </button>
+        }
+      />
+
+      <div className="no-print grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Field label="كود المعدة">
+          <Select value={code} onChange={(e) => setCode(e.target.value)}>
+            {allCodes.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </Field>
+        <Field label="من تاريخ"><TextInput type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></Field>
+        <Field label="إلى تاريخ"><TextInput type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field>
+      </div>
+
+      {!code ? (
+        <SectionCard><EmptyState icon={Wrench} title="لا توجد أكواد معدات مسجّلة بعد" /></SectionCard>
+      ) : (
+        <div id="print-area">
+          <PrintLetterhead />
+          <div className="mb-2" style={{ fontFamily: "Cairo" }}>
+            <div className="font-extrabold text-lg">{code}</div>
+            <div className="text-sm" style={{ color: COLORS.slate }}>{meta.type || ""} — {meta.brand || ""} — {meta.owner || ""} — {meta.location || ""}</div>
+            {(dateFrom || dateTo) && <div className="text-xs mt-1" style={{ color: COLORS.slate }}>الفترة: {dateFrom || "البداية"} → {dateTo || "الآن"}</div>}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 my-4">
+            <Box label="التكلفة" value={totalCost} />
+            <Box label="سولار" value={fuelTotal} />
+            <Box label="زيوت" value={oilsTotal} />
+            <Box label="فلاتر" value={filtersTotal} />
+            <Box label="إيراد" value={revTotal} />
+            <Box label="صافي" value={net} tone="navy" />
+          </div>
+
+          <SectionCard title={`صرف من العهد (${custodyItems.length})`}>
+            {custodyItems.length === 0 ? <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لا توجد بنود</div> : (
+              <div className="overflow-x-auto -mx-5"><table className="w-full text-sm">
+                <thead><tr style={{ background: COLORS.navy }}>{["التاريخ", "التصنيف", "الغرض", "المبلغ"].map((h) => <th key={h} className="px-3 py-2 text-right text-xs font-bold text-white">{h}</th>)}</tr></thead>
+                <tbody>{custodyItems.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((e) => (
+                  <tr key={e.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-3 py-2 whitespace-nowrap">{e.date}</td><td className="px-3 py-2 whitespace-nowrap">{e.category}</td><td className="px-3 py-2">{e.purpose}</td>
+                    <td className="px-3 py-2 tabular-nums font-bold whitespace-nowrap">{fmtMoney((Number(e.cash) || 0) + (Number(e.transfer) || 0) + (Number(e.check) || 0))}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </SectionCard>
+
+          <SectionCard title={`السولار (${fuelItems.length})`}>
+            {fuelItems.length === 0 ? <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لا توجد سجلات</div> : (
+              <div className="overflow-x-auto -mx-5"><table className="w-full text-sm">
+                <thead><tr style={{ background: COLORS.navy }}>{["التاريخ", "الكمية", "الإجمالي"].map((h) => <th key={h} className="px-3 py-2 text-right text-xs font-bold text-white">{h}</th>)}</tr></thead>
+                <tbody>{fuelItems.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((r) => (
+                  <tr key={r.id} className="border-t" style={{ borderColor: COLORS.border }}>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.date}</td><td className="px-3 py-2 tabular-nums">{fmtNum(r.quantity)}</td><td className="px-3 py-2 tabular-nums font-bold">{fmtMoney(r.total)}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </SectionCard>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SectionCard title={`الزيوت (${oilItems.filter((r) => oilCategory(r.itemType) === "زيوت").length})`}>
+              {oilItems.filter((r) => oilCategory(r.itemType) === "زيوت").length === 0 ? <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لا توجد سجلات</div> : (
+                <div className="space-y-1.5">{oilItems.filter((r) => oilCategory(r.itemType) === "زيوت").sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((r) => (
+                  <div key={r.id} className="flex justify-between text-sm py-1 border-t" style={{ borderColor: COLORS.border }}><span>{r.date} — {r.itemType}</span><b className="tabular-nums">{fmtMoney(r.total)}</b></div>
+                ))}</div>
+              )}
+            </SectionCard>
+            <SectionCard title={`الفلاتر (${oilItems.filter((r) => oilCategory(r.itemType) === "فلاتر").length})`}>
+              {oilItems.filter((r) => oilCategory(r.itemType) === "فلاتر").length === 0 ? <div className="text-xs text-center py-4" style={{ color: COLORS.slate }}>لا توجد سجلات</div> : (
+                <div className="space-y-1.5">{oilItems.filter((r) => oilCategory(r.itemType) === "فلاتر").sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((r) => (
+                  <div key={r.id} className="flex justify-between text-sm py-1 border-t" style={{ borderColor: COLORS.border }}><span>{r.date} — {r.itemType}</span><b className="tabular-nums">{fmtMoney(r.total)}</b></div>
+                ))}</div>
+              )}
+            </SectionCard>
+          </div>
+
+          {revItems.length > 0 && (
+            <SectionCard title={`الإيراد (${revItems.length})`}>
+              <div className="space-y-1.5">{revItems.map((r) => (
+                <div key={r.id} className="flex justify-between text-sm py-1 border-t" style={{ borderColor: COLORS.border }}><span>{r.startMonth || r.month} — {r.renter || ""}</span><b className="tabular-nums">{fmtMoney(r.total)}</b></div>
+              ))}</div>
+            </SectionCard>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3508,6 +3650,8 @@ function FuelView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
    الزيوت والفلاتر
 ============================================================ */
 const OIL_ITEM_TYPES = ["زيت محرك", "زيت هيدروليك", "زيت جير", "فلتر زيت", "فلتر هواء", "فلتر سولار", "فلتر هيدروليك", "شحم", "أخرى"];
+// بيفرّق بين الزيوت والفلاتر بالاعتماد على اسم الصنف (لو فيه كلمة "فلتر" يبقى فلتر، غير كده يبقى زيت/شحم)
+const oilCategory = (itemType) => (String(itemType || "").includes("فلتر") ? "فلاتر" : "زيوت");
 
 function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport }) {
   const [showForm, setShowForm] = useState(false);
@@ -3517,7 +3661,7 @@ function OilsView({ records, equipmentCodes, expenses, onAdd, onDelete, onImport
   const [importPreview, setImportPreview] = useState(null);
   const [importMode, setImportMode] = useState("append");
 
-  const empty = { date: todayISO(), equipmentCode: "", equipmentType: "", location: "", itemType: "", quantity: "", unitPrice: "", notes: "" };
+  const empty = { date: todayISO(), equipmentCode: "", equipmentType: "", location: "", category: "زيوت", itemType: "", quantity: "", unitPrice: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -8409,19 +8553,35 @@ function DepartmentBankView({ bankTransactions, onAdd, onDelete }) {
 
 function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, onDelete }) {
   const [showForm, setShowForm] = useState(false);
-  const empty = { date: todayISO(), amount: "", notes: "" };
+  const empty = { date: todayISO(), walletName: "المحفظة الرئيسية", amount: "", notes: "" };
   const [form, setForm] = useState(empty);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const wallet = useMemo(() => buildOctaneWallet({ octaneTopUps, fuelRecords, equipmentCodes }), [octaneTopUps, fuelRecords, equipmentCodes]);
 
-  const submit = (e) => { e.preventDefault(); onAdd(form); setForm(empty); setShowForm(false); };
+  const walletNames = useMemo(() => {
+    const set2 = new Set(["المحفظة الرئيسية"]);
+    octaneTopUps.forEach((t) => { if (t.walletName) set2.add(t.walletName); });
+    return [...set2];
+  }, [octaneTopUps]);
+
+  const byWallet = useMemo(() => {
+    const map = {};
+    walletNames.forEach((w) => { map[w] = 0; });
+    octaneTopUps.forEach((t) => {
+      const w = t.walletName || "المحفظة الرئيسية";
+      map[w] = (map[w] || 0) + (Number(t.amount) || 0);
+    });
+    return Object.entries(map).map(([walletName, charged]) => ({ walletName, charged }));
+  }, [octaneTopUps, walletNames]);
+
+  const submit = (e) => { e.preventDefault(); onAdd(form); setForm({ ...empty, walletName: form.walletName }); setShowForm(false); };
 
   return (
     <div className="space-y-6">
       <Header
         title="محفظة أوكتين (سولار وكارتات)"
-        sub="محفظة واحدة مشتركة — بتشحنها من رصيد أي شركة، وبتثبت السحب ده في بنك القسم بنفسك آخر الفترة"
+        sub="ممكن تضيف أكتر من محفظة وتشحن كل واحدة لوحدها — الاستهلاك بيتحسب من الإجمالي المشترك بين كل المحافظ"
         action={
           <button onClick={() => setShowForm((s) => !s)} className="px-4 py-2.5 rounded-lg text-sm font-bold text-white flex items-center gap-2" style={{ background: COLORS.navy }}>
             {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? "إلغاء" : "شحن جديد"}
@@ -8431,11 +8591,15 @@ function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, on
 
       {showForm && (
         <SectionCard title="تسجيل شحن جديد">
-          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
             <Field label="التاريخ" required><TextInput type="date" value={form.date} onChange={set("date")} required /></Field>
+            <Field label="المحفظة" required>
+              <TextInput list="wallet-names" value={form.walletName} onChange={set("walletName")} required placeholder="اسم المحفظة" />
+              <datalist id="wallet-names">{walletNames.map((w) => <option key={w} value={w} />)}</datalist>
+            </Field>
             <Field label="المبلغ" required><TextInput type="number" step="0.01" value={form.amount} onChange={set("amount")} required placeholder="0" /></Field>
             <Field label="ملاحظات"><TextInput value={form.notes} onChange={set("notes")} placeholder="اختياري" /></Field>
-            <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-3 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ الشحن</button>
+            <button type="submit" className="px-5 py-2.5 rounded-lg text-sm font-bold text-white md:col-span-4 w-fit" style={{ background: COLORS.gold, color: COLORS.navy }}>حفظ الشحن</button>
           </form>
         </SectionCard>
       )}
@@ -8454,6 +8618,17 @@ function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, on
           <div className="text-lg font-extrabold tabular-nums text-white">{fmtMoney(wallet.totalRemaining)}</div>
         </div>
       </div>
+
+      <SectionCard title="المشحون حسب كل محفظة">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {byWallet.map((w) => (
+            <div key={w.walletName} className="flex justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
+              <span style={{ color: COLORS.slate }}>{w.walletName}</span>
+              <span className="font-bold tabular-nums">{fmtMoney(w.charged)}</span>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       <SectionCard title="الاستهلاك موزّع حسب مالك المعدة (للمعلومية)">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -8474,7 +8649,7 @@ function OctaneWalletView({ octaneTopUps, fuelRecords, equipmentCodes, onAdd, on
             {octaneTopUps.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((t) => (
               <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border text-sm" style={{ borderColor: COLORS.border }}>
                 <div>
-                  <div className="font-bold">{t.date}</div>
+                  <div className="font-bold">{t.date} <span className="font-normal text-xs" style={{ color: COLORS.slate }}>— {t.walletName || "المحفظة الرئيسية"}</span></div>
                   {t.notes && <div className="text-xs mt-0.5" style={{ color: COLORS.slate }}>{t.notes}</div>}
                 </div>
                 <div className="flex items-center gap-3">
